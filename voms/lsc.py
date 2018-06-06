@@ -7,31 +7,40 @@ url='http://operations-portal.egi.eu/xml/voIDCard/public/voname/'
 HTTPOK=200
 
 def usage():
-    sys.stderr.write('get_lsc.py <VO>\n')
+    sys.stderr.write('lsc.py <VO>\n')
 
-def main(vo):
+def get_lsc_info(vo):
 
-    r=requests.get(url+vo)
+    try:
+        r=requests.get(url+vo)
+    except:
+        e=sys.exc_info()[1]
+        sys.stderr.write(str(e)+'\n')
+        sys.exit(1)
+
     if r.status_code!=HTTPOK:
         sys.stderr.write('Unable to get information for VO: '+vo+'\n')
         sys.exit(1)
 
-    xmldoc = minidom.parseString(r.text)
+    try:
+        xmldoc = minidom.parseString(r.text)
+    except:
+        return None
     voms_servers  = xmldoc.getElementsByTagName('VOMS_Server')
 
+    lscs={}
     for voms_server in voms_servers:
 
-        print ('\n')
-
         hostname  = voms_server.getElementsByTagName('hostname')[0]
-        print (hostname.firstChild.nodeValue+'.lsc')
+        lsc_file_name= hostname.firstChild.nodeValue+'.lsc'
 
         X509  = voms_server.getElementsByTagName('X509Cert')[0]
-        DN=X509.getElementsByTagName('DN')[0]
-        CA_DN=X509.getElementsByTagName('CA_DN')[0]
-        print (DN.firstChild.nodeValue)
-        print (CA_DN.firstChild.nodeValue)
-        print ('\n')
+        DN=X509.getElementsByTagName('DN')[0].firstChild.nodeValue
+        CA_DN=X509.getElementsByTagName('CA_DN')[0].firstChild.nodeValue
+
+        lscs.update({lsc_file_name: {'DN':DN, 'CA_DN':CA_DN} })
+
+    return lscs
 
 if __name__ == '__main__':
 
@@ -41,4 +50,4 @@ if __name__ == '__main__':
 
     vo=sys.argv[1]
 
-    main(vo)
+    print get_lsc_info(vo)
