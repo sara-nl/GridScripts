@@ -29,7 +29,7 @@ Ernst and Young
 """
 
 sender=''
-to=['']
+to=['','']
 
 db=''
 dbuser=''
@@ -75,61 +75,59 @@ def main():
     last_month_text=data[0]
     last_year=data[1]
     last_month_num=data[2]
-    csv_file='/tmp/nikhef.csv'
 
-    s='select id,name from Sites;'
+    csv_file='/tmp/surfsara.csv'
+
+# SARA-MATRIX=14
+# NIKHEF_ELPROD=1
+# RUG-CIT=16
+    site_dict={'SARA-MATRIX':14,
+               'RUG-CIT':16,
+               'NIKHEF-ELPROD':1}
+
+    pitd=last_month_text+ " "+str(last_year)
+    f=open(csv_file,'w')
     conn=mysql.connector.Connect(host=dbhost,user=dbuser,password=dbpasswd,database=db)
     c=conn.cursor()
 
-    c.execute(s)
-    site_dict={}
-    for o in c:
-# Hack to skip misconfiguration
-        if o[0]==15: continue
-        site_dict.update({unicodedata.normalize('NFKD', o[1]).encode('ascii','ignore'):o[0]})
 
-    f=open(csv_file,'w')
     for site in site_dict.keys():
 
         siteid=site_dict[site]
-        s='select VOid,count(*),sum(WallDuration)/3600.0,sum(CpuDuration)/3600.0,sum(WallDuration*NodeCount*Processors)/3600.0 from JobRecords where SiteID=%s and EndMonth=%s and EndYear=%s group by VOid;'%(siteid,last_month_num,last_year)
+
+        s='select VOs.name,VOGroups.name,count(JobRecords.LocalJobId),sum(JobRecords.WallDuration)/3600.0,sum(JobRecords.CpuDuration)/3600.0,sum(JobRecords.WallDuration*JobRecords.NodeCount*JobRecords.Processors)/3600.0 from JobRecords,VOs,VOGroups where JobRecords.SiteID=%s and VOs.id=JobRecords.VOID and VOGroups.id=JobRecords.VOGroupID and EndMonth=%s and EndYear=%s group by VOs.name,VOGroups.name;'%(siteid,last_month_num,last_year)
+
 
         c.execute(s)
+
         olist=[]
         for o in c:
             olist.append(o)
 
-        dict={}
-        for o in olist:
-            VOid=o[0]
-            s='select VOs.name from VOs where VOs.id='+str(VOid)+';'
-
-            c.execute(s)
-            m=c.fetchone()
-
-            list=[]
-            for l in o[1:]:
-                list.append(l)
-
-            dict.update({m[0]:list})
-
-
-        pitd=last_month_text+ " "+str(last_year)
         f.write(";\n;\n;\n;\n")
         f.write("Accounting data for "+site+" from the Nikhef database for "+pitd+";\n")
-        f.write("VO;# of jobs;Wallclock (hours);CPU hours;Wallclock*nodes*cores (hours)\n")
-        for k in dict.keys():
-            f.write(str(k)+";"+str(dict[k][0])+";"+str(dict[k][1])+";"+str(dict[k][2])+";"+str(dict[k][3])+";\n")
+        f.write("VO;VO group;# of jobs;Wallclock (hours);CPU hours;Wallclock*nodes*cores (hours)\n")
+
+        for o in olist:
+
+            VO=o[0].encode('ascii')
+            VOGroup=o[1].encode('ascii')
+            njobs=str(o[2])
+            whours=str(int(round(float(o[3]))))
+            CPUhours=str(int(round(float(o[4]))))
+            wnchours=str(int(round(float(o[5]))))
+            f.write(VO+';'+VOGroup+';'+njobs+';'+whours+';'+CPUhours+';'+wnchours+';\n')
+
     f.close()
 
     send_mail(sender,to,'Accounting data for the Dutch Grid infrastructure from the NIKHEF database for '+pitd,mail_text%(pitd),[ csv_file ])
 
-    cmdstring="curl -u some_random_text -T "+csv_file+" https://surfdrive.surf.nl/files/public.php/webdav/Compute/"+str(last_year)+"/"+last_month_text+ "-"+str(last_year)+"_ey_"+os.path.basename(csv_file)
+    cmdstring="curl -u somerandomtext -T "+csv_file+" https://surfdrive.surf.nl/files/public.php/webdav/Compute/"+str(last_year)+"/"+last_month_text+ "-"+str(last_year)+"_ey_"+os.path.basename(csv_file)
     a=commands.getstatusoutput(cmdstring)
 
     os.remove(csv_file)
 
+
 if __name__ == '__main__':
 
     main()
-
