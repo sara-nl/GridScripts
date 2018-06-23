@@ -7,6 +7,7 @@ import commands
 import sys
 import getopt
 import unicodedata
+import re
 
 import smtplib, os
 from email.MIMEMultipart import MIMEMultipart
@@ -28,17 +29,52 @@ Cheers,
 Ernst and Young
 """
 
-sender=''
+sender='ey@surfsara.nl'
 to=['','']
+#to=['']
 
 db=''
 dbuser=''
 dbhost=''
 dbpasswd=''
 
+url=""
+surfdrivelink=""
+
+uploadfile="curl -s -S -u %s -T %s --head %s"
+doesdirectoryexist="curl  -s -S -u %s --head -X PROPFIND %s"
+createdirectory="curl  -s -S -u %s --head -X MKCOL %s"
+http_code=re.compile('HTTP.*\s+(\d{3})\s*.*\n')
+
+def create_directory(dir):
+
+    r=commands.getoutput(doesdirectoryexist % (surfdrivelink,url+'/'+dir))
+
+    http_status=int(http_code.match(r).group(1))
+    if http_status==404:
+        r=commands.getoutput(createdirectory % (surfdrivelink,url+'/'+dir))
+        http_status=int(http_code.match(r).group(1))
+        assert(http_status==201)
+
+    return
+
+def upload_file(dir,src_file,dest_file):
+
+    create_directory(dir)
+
+    r=commands.getoutput(uploadfile % (surfdrivelink,src_file,url+'/'+dir+'/'+dest_file))
+    l=http_code.findall(r)
+    http_status=int(l[len(l)-1])
+    assert(http_status>=200 and http_status<=207)
+
+    return
+    
+    
+    
+
 def get_lastmonth():
     today=datetime.date.today()
-    first=datetime.date(day=1,month=today.month,year=today.year)
+    first=datetime.date(day=1,month=today.month-4,year=today.year)
     lastdayoflastmonth=first-datetime.timedelta(days=1)
     last_month=lastdayoflastmonth.strftime('%B')
     last_year=lastdayoflastmonth.strftime('%Y')
@@ -76,7 +112,7 @@ def main():
     last_year=data[1]
     last_month_num=data[2]
 
-    csv_file='/tmp/surfsara.csv'
+    csv_file='/tmp/accounting.csv'
 
 # SARA-MATRIX=14
 # NIKHEF_ELPROD=1
@@ -95,7 +131,7 @@ def main():
 
         siteid=site_dict[site]
 
-        s='select VOs.name,VOGroups.name,count(JobRecords.LocalJobId),sum(JobRecords.WallDuration)/3600.0,sum(JobRecords.CpuDuration)/3600.0,sum(JobRecords.WallDuration*JobRecords.NodeCount*JobRecords.Processors)/3600.0 from JobRecords,VOs,VOGroups where JobRecords.SiteID=%s and VOs.id=JobRecords.VOID and VOGroups.id=JobRecords.VOGroupID and EndMonth=%s and EndYear=%s group by VOs.name,VOGroups.name;'%(siteid,last_month_num,last_year)
+        s='select VOs.name,VOGroups.name,VORoles.name,count(JobRecords.LocalJobId),sum(JobRecords.WallDuration)/3600.0,sum(JobRecords.CpuDuration)/3600.0,sum(JobRecords.WallDuration*JobRecords.NodeCount*JobRecords.Processors)/3600.0 from JobRecords,VOs,VOGroups,VORoles where JobRecords.SiteID=%s and VOs.id=JobRecords.VOID and VOGroups.id=JobRecords.VOGroupID and VORoles.id=JobRecords.VORoleID and EndMonth=%s and EndYear=%s group by VOs.name,VOGroups.name,VORoles.name;'%(siteid,last_month_num,last_year)
 
 
         c.execute(s)
@@ -106,24 +142,25 @@ def main():
 
         f.write(";\n;\n;\n;\n")
         f.write("Accounting data for "+site+" from the Nikhef database for "+pitd+";\n")
-        f.write("VO;VO group;# of jobs;Wallclock (hours);CPU hours;Wallclock*nodes*cores (hours)\n")
+        f.write("VO;VO group;VO role;# of jobs;Wallclock (hours);CPU hours;Wallclock*nodes*cores (hours)\n")
 
         for o in olist:
 
             VO=o[0].encode('ascii')
             VOGroup=o[1].encode('ascii')
-            njobs=str(o[2])
-            whours=str(int(round(float(o[3]))))
-            CPUhours=str(int(round(float(o[4]))))
-            wnchours=str(int(round(float(o[5]))))
-            f.write(VO+';'+VOGroup+';'+njobs+';'+whours+';'+CPUhours+';'+wnchours+';\n')
+            VORole=o[2].encode('ascii')
+            njobs=str(o[3])
+            whours=str(int(round(float(o[4]))))
+            CPUhours=str(int(round(float(o[5]))))
+            wnchours=str(int(round(float(o[6]))))
+            f.write(VO+';'+VOGroup+';'+VORole+';'+njobs+';'+whours+';'+CPUhours+';'+wnchours+';\n')
 
     f.close()
 
     send_mail(sender,to,'Accounting data for the Dutch Grid infrastructure from the NIKHEF database for '+pitd,mail_text%(pitd),[ csv_file ])
 
-    cmdstring="curl -u somerandomtext -T "+csv_file+" https://surfdrive.surf.nl/files/public.php/webdav/Compute/"+str(last_year)+"/"+last_month_text+ "-"+str(last_year)+"_ey_"+os.path.basename(csv_file)
-    a=commands.getstatusoutput(cmdstring)
+    
+    upload_file(str(last_year),csv_file,last_month_text+ "-"+str(last_year)+"_ey_"+os.path.basename(csv_file))
 
     os.remove(csv_file)
 
