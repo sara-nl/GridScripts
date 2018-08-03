@@ -74,7 +74,7 @@ def upload_file(dir,src_file,dest_file):
 
 def get_lastmonth():
     today=datetime.date.today()
-    first=datetime.date(day=1,month=today.month-4,year=today.year)
+    first=datetime.date(day=1,month=today.month,year=today.year)
     lastdayoflastmonth=first-datetime.timedelta(days=1)
     last_month=lastdayoflastmonth.strftime('%B')
     last_year=lastdayoflastmonth.strftime('%Y')
@@ -112,7 +112,8 @@ def main():
     last_year=data[1]
     last_month_num=data[2]
 
-    csv_file='/tmp/accounting.csv'
+    t=str(time.time())
+    csv_file='/tmp/accounting'+t+'.csv'
 
 # SARA-MATRIX=14
 # NIKHEF_ELPROD=1
