@@ -1,0 +1,160 @@
+#!/bin/bash
+
+# This script talks to a dCache webdav door to get the checksum(s) of a file.
+#
+# Changes:
+# 2018-07-11 - Onno - Initial version
+
+usage() {
+  cat <<-EOF
+	Lists checksum(s) for a file in a dCache storage system through WebDAV.
+	Usage: $0 [options...]
+	Options are:
+	  --url <url>          - A webdav URL of a file in a dCache instance
+	  --adler32            - List only the Adler32 checksum
+	  --md5                - List only the MD5 checksum
+	                         Default: list both Adler32 and MD5 if available
+	  --proxy              - Authenticate with proxy specified in X509_USER_PROXY
+	  --user <username>    - Authenticate with Username/password
+	  --debug              - Show additional info for troubleshooting
+	
+	Examples:
+	  $0 --url https://my-dcache-server.org/users/homer/disk-shared/ --user homer
+	  $0 --url https://my-dcache-server.org:2882/users/homer/disk-shared/ --proxy --md5
+	EOF
+  exit 1
+}
+
+url=
+adler32=false
+md5=false
+user=
+proxy=false
+recursive=false
+debug=false
+
+while [ $# -gt 0 ] ; do
+  case "$1" in
+    --url )
+      url="$2"
+      shift 2
+      ;;
+    --adler32 )
+      adler32=true
+      shift
+      ;;
+    --md5 )
+      md5=true
+      shift
+      ;;
+    --recursive )
+      echo "Not implemented" ; exit 1
+      recursive=true
+      shift
+      ;;
+    --user )
+      user=$2
+      proxy=false
+      shift 2
+      ;;
+    --proxy )
+      proxy=true
+      shift
+      ;;
+    --debug )
+      debug=true
+      shift 1
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+if [ -z "$url" ] ; then
+  usage
+fi
+
+# If neither adler32 nor md5 is requested, show them both.
+if ! $md5 && ! $adler32 ; then
+  md5=true
+  adler32=true
+fi
+
+if [ -n "$user" -a "$proxy" == "true" ] ; then
+  echo "ERROR: you can't specify both --user and --proxy." 1>&2
+  exit 1
+fi
+
+server=$(echo "$url" | egrep -o 'https://[^/]+/')
+dir=$(echo "$url" | sed -e 's#https://[^/]\+##')
+if [ -z "$dir" ] ; then
+  dir=/
+fi
+
+if [ -z "$server" ] ; then
+  echo "Please include the server in '--url'." 1>&2
+  exit 1
+fi
+
+if $proxy ; then
+  # Check if the proxy is still valid; if not, exit after the error message.
+  if [ -x "$(command -v voms-proxy-info)" ]; then
+    voms-proxy-info --exists 1>&2 || exit 1
+  fi
+  authn="--capath /etc/grid-security/certificates/ --cert $X509_USER_PROXY --cacert $X509_USER_PROXY"
+else
+  if [ -z "$user" ] ; then
+    echo "Please specify --proxy, or specify a username with --user." 1>&2
+    exit 1
+  fi
+  authn="-u $user"
+fi
+
+result=false
+
+if $adler32 ; then
+  if $debug ; then
+    echo "Curl command:"
+    echo "curl --head --header 'Want-Digest: ADLER32' --silent --fail " \
+               "$authn " \
+               "$url"
+    echo
+  fi
+  result_adler32=$(curl --head --header 'Want-Digest: ADLER32' --silent --fail \
+                        $authn \
+                        $url \
+                   | egrep -o 'adler32=[0-9a-f]+' )
+  if [ -n "$result_adler32" ] ; then
+    result=true
+    echo "$result_adler32  $dir"
+  fi
+fi
+
+if $md5 ; then
+  if $debug ; then
+    echo "Curl command:"
+    echo "curl --head --header 'Want-Digest: MD5' --silent --fail " \
+               "$authn " \
+               "$url"
+    echo
+  fi
+  result_md5=$(curl --head --header 'Want-Digest: MD5' --silent --fail \
+                    $authn \
+                    $url \
+               | grep -o 'md5=.*' \
+               | sed -e 's/md5=//' -e 's/[\r\n]*$//' \
+               | base64 --decode \
+               | xxd -p )
+  if [ -n "$result_md5" ] ; then
+    result=true
+    echo "md5=$result_md5  $dir"
+  fi
+fi
+
+
+# Still no result? Then show error.
+if ! $result ; then
+  echo "ERROR: no checksum found." 1>&2
+  exit 1
+fi 
