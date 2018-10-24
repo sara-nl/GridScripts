@@ -1,0 +1,12 @@
+#!/bin/python
+
+# This script decodes (or "deserializes") and prints a macaroon.
+# It uses pymacaroons, which can be installed with:
+# yum install python2-pip
+# pip install pymacaroons
+
+import sys
+from pymacaroons import Macaroon
+
+m = Macaroon.deserialize(sys.argv[1])
+print(m.inspect())
