@@ -1,0 +1,322 @@
+#!/bin/bash
+
+# This script talks to a dCache webdav door to obtain a share link
+# (using Macaroons, see https://www.dcache.org/manuals/workshop-2017-05-29-Umea/000-Final/anupam_macaroons_v02.pdf )
+# Thanks to Paul Millar for providing info and examples.
+#
+# Latest version available at:
+# https://github.com/onnozweers/dcache-scripts/blob/master/get-share-link
+#
+# Uses a script called view-macaroon, which is available here:
+# https://github.com/onnozweers/dcache-scripts/blob/master/view-macaroon
+#
+# Changes:
+# 2018-06-22 - Onno - Initial version
+# 2018-06-22 - Onno - Added --chroot option
+# 2018-06-25 - Onno - Fixed X509 authentication; adding curl command to debug output
+# 2018-07-03 - Onno - Added output options (macaroon, curl, rclone); added disclaimer
+# 2018-07-10 - Onno - Added --ip option
+# 2018-09-07 - Onno - Adding deserialized macaroon to debug output
+# 2018-09-13 - Onno - Log macaroon properties in ~/macaroons.log, without signature
+# 2018-09-14 - Onno - Added maximum upload file size option
+
+usage() {
+  cat <<-EOF
+	Obtains a share link from a dCache webdav door using Macaroons.
+	Usage: $0 [options...]
+	Options are:
+	  --url <url>
+	  --chroot               - Make specified path the root diectory, hiding upper dirs
+	  --proxy                - Use proxy specified in X509_USER_PROXY
+	  --user <username>      - Username/password authentication
+	  --permissions <list>   - Comma separated list of allowed activities
+	                           DOWNLOAD,UPLOAD,DELETE,MANAGE,LIST,
+	                           READ_METADATA,UPDATE_METADATA
+	  --duration             - Duration that the link will be valid, in ISO8601 format
+	                           See https://en.wikipedia.org/wiki/ISO_8601#Durations
+	                           The duration may be limited by the server.
+	  --ip <subnet-list>     - Allow access from these addresses/subnets.
+	                           Multiple subnets may be specified, comma separated.
+	                           Don't forget IPv6.
+	  --max-file-size        - Set a maximum file size for uploads. dCache 5 required.
+	  --output link          - Print a link that anyone can open in a browser.
+	                           If you open the link in your browser, please do it in 
+	                           a new private window, to be certain you're authenticated
+	                           by the macaroon and not by x509 or username/password.
+	  --output macaroon      - Print authentication token only.
+	  --output curl          - Print curl command(s) to use the data.
+	  --output rclone <name> - Save an rclone config file, <name>.conf.
+	                           You need rclone v1.42-012-gfa051ff9 or newer to use it.
+	  --debug                - Provide extra output to learn what's going on.
+	
+	Macaroon properties are logged in ~/macaroons.log.
+	Their signature is not logged to prevent theft.
+
+	Examples:
+	  $0 --url https://my-dcache-server.org/users/homer/disk-shared/ --user homer
+	  $0 --url https://my-dcache-server.org:2882/users/homer/disk-shared/ --proxy --duration P14D
+	  $0 --url https://my-dcache-server.org:2882/users/homer/disk-shared/ --proxy --chroot --output rclone homers-share
+	  $0 --url https://my-dcache-server.org/users/homer/disk-shared/ --user homer --ip 145.100.0.0/16,2001:610:108::/48
+	
+	Warning:
+	A macaroon is token that authorizes anyone who gets it. Send it through private channels (not email).
+	Add sufficient caveats to limit the risk of accidents or abuse.
+	EOF
+  exit 1
+}
+
+url=
+path_or_root='path'
+activity=DOWNLOAD,LIST
+user=
+proxy=false
+duration=PT12H  # Default: 12 hours
+ip=
+output='link'
+debug=false
+max_file_size=
+
+while [ $# -gt 0 ] ; do
+  case "$1" in
+    --url )
+      url="$2"
+      shift 2
+      ;;
+    --chroot )
+      path_or_root="root"
+      shift
+      ;;
+    --user )
+      user="$2"
+      proxy=false
+      shift 2
+      ;;
+    --proxy )
+      proxy=true
+      shift
+      ;;
+    --permissions )
+      activity="$2"
+      shift 2
+      ;;
+    --duration )
+      duration="$2"
+      shift 2
+      ;;
+    --ip )
+      ip="$2"
+      shift 2
+      ;;
+    --max-file-size )
+      max_file_size="$2"
+      shift 2
+      ;;
+    --output )
+      output="$2"
+      shift
+      if [ "$output" == "rclone" ] ; then
+        remote_name="$2"
+        shift
+      fi
+      shift
+      ;;
+    --debug )
+      debug=true
+      shift 1
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+#
+# Input checking.
+#
+
+if [ -z "$url" ] ; then
+  usage
+fi
+
+if [ -n "$user" -a "$proxy" == "true" ] ; then
+  echo "ERROR: you can't specify both --user and --proxy." 1>&2
+  exit 1
+fi
+
+server=$(echo "$url" | egrep -o 'https://[^/]+/')
+dir=$(echo "$url" | sed -e 's#https://[^/]\+##')
+if [ -z "$dir" ] ; then
+  dir=/
+fi
+
+if [ -z "$server" ] ; then
+  echo "Please include the server in '--url'." 1>&2
+  exit 1
+fi
+
+if $proxy ; then
+  # Check if the proxy is still valid; if not, exit after the error message.
+  if [ -x voms-proxy-info ]; then
+    voms-proxy-info --exists 1>&2 || exit 1
+  fi
+  authn="--capath /etc/grid-security/certificates/ --cert $X509_USER_PROXY --cacert $X509_USER_PROXY"
+else
+  if [ -z "$user" ] ; then
+    echo "Please specify --proxy, or specify a username with --user." 1>&2
+    exit 1
+  fi
+  authn="-u $user"
+fi
+
+if ! echo "$duration" | grep --silent --perl-regex '^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d+[HMS])(\d+H)?(\d+M)?(\d+S)?)?$' ; then
+  echo "Duration should be in ISO8601 duration format. Examples: PT5M (5 minutes), P1Y2M (1 year and 2 months)" 1>&2
+  exit 1
+fi
+
+case $output in
+  link|macaroon|curl )
+    # output format OK
+    ;;
+  rclone )
+    if [ ! -x rclone ]; then
+      echo 'rclone not found in $PATH.' 1>&2
+      exit 1
+    fi
+    if [ -z "$remote_name" ] ; then
+      echo "If output is rclone, please specify a name for the remote." 1>&2
+      exit 1
+    fi
+    ;;
+  * )
+    echo "Unrecognised output format '$output'." 1>&2
+    exit 1
+esac
+
+#
+#  End of input checking.
+#
+
+if [ -n "$ip" ] ; then
+  ip_caveat=", \"ip:$ip\""
+else
+  ip_caveat=
+fi
+
+if [ -n "$max_file_size" ] ; then
+  max_size_caveat=", \"max-upload:$max_file_size\""
+else
+  max_size_caveat=
+fi
+
+read -r -d '' json_request <<EOF
+{
+  "caveats"  : ["$path_or_root:$dir", "activity:$activity" $ip_caveat $max_size_caveat], 
+  "validity" : "$duration"
+}
+EOF
+
+if $debug ; then
+  echo "JSON input:"
+  echo "$json_request"
+  echo
+  echo "Curl command:"
+  echo "curl --silent " \
+            "$authn " \
+            "-X POST -H 'Content-Type: application/macaroon-request' " \
+            "-d \'$json_request\' " \
+            "$server "
+fi
+
+
+result=$(curl --silent \
+              $authn \
+              -X POST -H 'Content-Type: application/macaroon-request' \
+              -d "$json_request" \
+              $server )
+
+if ! echo "$result" | grep --silent "targetWithMacaroon" ; then
+  {
+    echo "ERROR: could not get share link from $server."
+    # Show output from server in the nicest way possible
+    if [ -x html2text ]; then
+      echo "$result" | html2text
+    else
+      echo "$result"
+    fi
+  }  1>&2
+  exit 1
+fi
+
+if $debug ; then
+  echo "JSON output:"
+  echo "$result"
+  echo
+fi
+
+macaroon=$(echo "$result" | jq -r '.macaroon')
+link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
+
+# Show contents of macaroon when --debug is specified
+if $debug ; then
+  if [ -x view-macaroon ] ; then
+    echo "=== View deserialized macaroon ==="
+    view-macaroon "$macaroon"
+    echo "=== End deserialized macaroon ==="
+    echo
+  fi
+fi
+
+# Log macaroon properties in a (private) file; strip signature to prevent theft
+if [ -x view-macaroon ] ; then
+  {
+    echo "=== $(date) ==="
+    view-macaroon "$macaroon" | grep -v signature
+    echo -e "=====================================\n"
+  } >> ~/macaroons.log
+  chmod 600 ~/macaroons.log
+fi
+
+
+case $output in
+  link )
+    # Show link that can be pasted in browser
+    echo "$link"
+    ;;
+  macaroon )
+    # Just the bare token, nothing else
+    echo "$macaroon"
+    ;;
+  curl )
+    # Show download and upload command with curl
+    if echo "$activity" | grep --silent -e 'DOWNLOAD' -e 'LIST' ; then
+      echo "Curl download/listing command:"
+      echo
+      echo "curl $link"
+      echo
+    fi
+    if echo "$activity" | grep --silent 'UPLOAD' ; then
+      echo "Curl upload command:"
+      echo
+      if [ "$path_or_root" = "root" ] ; then
+        echo "curl --header 'Authorization: BEARER $macaroon' --upload-file myfile $server"
+      else
+        echo "curl --header 'Authorization: BEARER $macaroon' --upload-file myfile $url"
+      fi
+      echo
+    fi
+    ;;
+  rclone )
+    echo "Creating rclone config file $remote_name.conf:"
+    echo
+    $debug && echo "rclone --config=$remote_name.conf config create $remote_name webdav url $server vendor other user '' password '' bearer_token $macaroon"
+    rclone --config=$remote_name.conf config create $remote_name webdav url $server vendor other user '' password '' bearer_token $macaroon
+    echo
+    echo "Send this file to the persons you want to share data with."
+    echo "They need rclone v1.42-012-gfa051ff9 or newer to access the data."
+    echo "Example command:"
+    echo "rclone --config=$remote_name.conf ls $remote_name:"
+    ;;
+  * )
+    echo "Unrecognised output format '$output'." 1>&2
+    exit 1
+esac
