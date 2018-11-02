@@ -22,6 +22,7 @@
 # 2018-09-07 - Onno - Adding deserialized macaroon to debug output
 # 2018-09-13 - Onno - Log macaroon properties in ~/macaroons.log, without signature
 # 2018-09-14 - Onno - Added maximum upload file size option
+# 2018-11-02 - Onno - Load defaults from file
 
 usage() {
   cat <<-EOF
@@ -78,6 +79,16 @@ ip=
 output='link'
 debug=false
 max_file_size=
+
+
+# Load defaults from configuration file if exists
+for configfile in /etc/get-macaroon.conf ~/.get-macaroon.conf ; do
+  if [ -f "$configfile" ] ; then
+    echo "Loading $configfile"
+    source "$configfile"
+  fi
+done
+
 
 while [ $# -gt 0 ] ; do
   case "$1" in
@@ -259,14 +270,12 @@ fi
 macaroon=$(echo "$result" | jq -r '.macaroon')
 link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
 
-# Show contents of macaroon when --debug is specified
-if $debug ; then
-  if [ -x view-macaroon ] ; then
-    echo "=== View deserialized macaroon ==="
-    view-macaroon "$macaroon"
-    echo "=== End deserialized macaroon ==="
-    echo
-  fi
+# Show contents of macaroon
+if [ -x view-macaroon ] ; then
+  echo "=== View deserialized macaroon ==="
+  view-macaroon "$macaroon"
+  echo "=== End deserialized macaroon ==="
+  echo
 fi
 
 # Log macaroon properties in a (private) file; strip signature to prevent theft
