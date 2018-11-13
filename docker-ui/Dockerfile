@@ -1,7 +1,7 @@
 # Dockerfile to create a container with the UMD UI service
 #
 # Built the container by:
-# docker build -t umd-ui .
+# docker build -t docker-ui .
 #
 # Run it by:
 # docker run -it <id> startui
