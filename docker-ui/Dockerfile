@@ -1,7 +1,7 @@
 # Dockerfile to create a container with the UMD UI service
 #
 # Built the container by:
-# docker build -t umd-ui
+# docker build -t umd-ui .
 #
 # Run it by:
 # docker run -it <id> startui
@@ -26,6 +26,8 @@ COPY ./userkey.pem /root/.globus/userkey.pem
 RUN chmod 600 /root/.globus/userkey.pem
 COPY ./usercert.pem /root/.globus/usercert.pem
 RUN chmod 644 /root/.globus/usercert.pem
+COPY ./x509up_u0 /tmp/x509up_u0
+RUN chmod 600 /tmp/x509up_u0
 
 # Replace myvo.eu with your VO name
 #------------8<-------------
