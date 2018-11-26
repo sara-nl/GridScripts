@@ -30,6 +30,9 @@ parser=argparse.ArgumentParser(
         QUEUED: the file is being fetched from tape
         FAILED: could not get the file from tape
         READY: file is online.
+        
+        To summarize the output, use the script like this:
+        state.py --file myfiles | awk '{print $2}' | sort | uniq --count
         '''))
 
 parser.add_argument('--file', action="store", dest="file", required=True,
