@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # Written by Ron Trompert.
-# Some small modifications by Onno Zweers.
+# Some small modifications by Onno Zweers, inspired by https://gitlab.cern.ch/dmc/gfal2-bindings/tree/develop/example/python.
 
 import pythonpath
 import gfal2
