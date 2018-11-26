@@ -36,7 +36,7 @@ parser.add_argument('--file', action="store", dest="file", required=True,
     help='File containing file names to be staged starting with: /pnfs/grid.sara.nl/...')
 
 parser.add_argument('--token', action="store", dest="token", required=False,
-    help='Token printed by stage.py. Optional. If used, might be a bit faster.')
+    help='Stage request token printed by stage.py. Optional. If used, might be a bit faster.')
 
 args=parser.parse_args()
 
