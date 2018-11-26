@@ -1,6 +1,6 @@
 # GridScripts
 
-Welcome! These are a few scripts that we use at SURFsara to work with the (WLCG/EGI) Grid.
+Welcome! These are a few scripts that we use at [SURFsara](https://www.surfsara.nl) to work with [the Grid](http://doc.grid.surfsara.nl/en/latest/).
 
 ## docker-ui
 
