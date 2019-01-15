@@ -25,7 +25,7 @@ Get checksum of a file through WebDAV. Supports X509 and username/password auth,
 
 ## get-macaroon
 
-Script to obtain a macaroon (bearer token) from a dCache WebDAV door.
+Script to obtain a macaroon (bearer token) from a dCache WebDAV door. Macaroons can be used to share data with others, and some more applications. See this presentation for more details: https://www.dcache.org/manuals/workshop-2018-05-28-DESY/macaroons.pdf
 
 ## view-macaroon
 
