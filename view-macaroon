@@ -1,7 +1,7 @@
 #!/bin/python
 
 # This script decodes (or "deserializes") and prints a macaroon.
-# It uses pymacaroons, which can be installed with:
+# It uses pymacaroons, which can be installed on Centos 7 with:
 # yum install python2-pip
 # pip install pymacaroons
 
