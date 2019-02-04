@@ -304,7 +304,11 @@ case $output in
     if echo "$activity" | grep --silent -e 'DOWNLOAD' -e 'LIST' ; then
       echo "Curl download/listing command:"
       echo
-      echo "curl $link"
+      if [ "$path_or_root" = "root" ] ; then
+        echo "curl --fail --location $link --output myfile"
+      else
+        echo "curl --fail --location $url?authz=$macaroon --output myfile"
+      fi
       echo
     fi
     if echo "$activity" | grep --silent 'UPLOAD' ; then
