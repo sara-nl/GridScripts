@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+# Get the latest version from the following URL:
+#     https://github.com/alvarolopez/ggus_report_generator
+# AUTHOR: Alvaro Lopez <aloga@ifca.unican.es>
+# ./ggus_report_generator.py -s NGI_NL -a SARA-MATRIX username password
+
 from __future__ import print_function
 
 import argparse
@@ -13,10 +18,22 @@ __version__ = 20141002
 # Change it if you want to use it for your NGI without specifing
 # it in the command-line
 SUPPORT_UNIT = "NGI_NL"
+AFFECTED_SITE = "SARA-MATRIX"
+
+#message_header = """
+### Open GGUS tickets ###
+#There are %(ticket count)s open tickets under %(support_unit)s %(affected_siter)s scope. Please
+#find below a short summary of them. Please take the appropriate actions:
+#    - Change the ticket status from "ASSIGNED" to "IN PROGRESS".
+#    - Provide feedback on the issue as regularly as possible.
+#    - In case of problems, ask for help in <ibergrid-ops@listas.cesga.es>
+#    - For long pending issues, put your site/node in downtime.
+#    - Do not forget to close the ticket when you have solved the problem.
+#"""
 
 message_header = """
 ### Open GGUS tickets ###
-There are %(ticket count)s open tickets under %(support_unit)s scope.
+There are %(ticket count)s open tickets under %(support_unit)s %(affected_siter)s scope.
 """
 
 class GGUSReportException(Exception):
@@ -34,9 +51,10 @@ class GGUSTicket(object):
       Description : %(subject)s
       Link        : https://ggus.eu/ws/ticket_info.php?ticket=%(request_id)s"""
 
-    def __init__(self, ticket, support_unit):
+    def __init__(self, ticket, support_unit, affected_siter=""):
         self.ticket = ticket
         self.support_unit = support_unit
+        self.affected_siter = affected_siter
 
     def _get_by_xml_tag(self, tag):
         aux = self.ticket.getElementsByTagName(tag)
@@ -88,19 +106,20 @@ class GGUSTicket(object):
 class GGUSConnection(object):
     url = ("https://ggus.eu/index.php?mode=ticket_search&ticket_id="
            "&supportunit=%(support_unit)s&su_hierarchy=0&vo=all&user="
-           "&keyword=&involvedsupporter=&assignedto=&affectedsite="
+           "&keyword=&involvedsupporter=&assignedto=&affectedsite=%(affected_siter)s"
            "&specattrib=none&status=open&priority=&typeofproblem=all"
            "&ticket_category=all&mouarea=&date_type=creation+date"
            "&tf_radio=1&timeframe=any&from_date=&to_date=&untouched_date="
            "&orderticketsby=REQUEST_ID&orderhow=desc&search_submit=GO%%21"
            "&writeFormat=XML")
 
-    def __init__(self, user, password, support_unit):
+    def __init__(self, user, password, support_unit, affected_siter):
         self.session = None
         self.user = user
         self.password = password
         self.support_unit = support_unit
-        self.url = self.url % {"support_unit": support_unit}
+        self.affected_siter = affected_siter
+        self.url = self.url % {"support_unit": support_unit,"affected_siter":affected_siter}
 
     def _get_ggus_session(self):
         s = requests.Session()
@@ -152,6 +171,13 @@ def parse_args():
                         help=('Only tickets belonging to this support unit '
                               'will be collected'))
 
+    parser.add_argument('-a', '--affected-site',
+                        dest='affected_siter',
+                        metavar='AFFECTED_SITE',
+                        default=AFFECTED_SITE,
+                        help=('Only tickets belonging to this affected site '
+                              'will be collected'))
+
     parser.add_argument('-r', '--reverse',
                         dest='reverse',
                         default=False,
@@ -166,7 +192,8 @@ def main():
 
     ggus = GGUSConnection(args.username,
                           args.password,
-                          args.support_unit)
+                          args.support_unit,
+                          args.affected_siter)
 
     tickets = ggus.tickets()
 
@@ -174,6 +201,7 @@ def main():
         tickets.reverse()
 
     print (message_header % {"support_unit": args.support_unit,
+                             "affected_siter": args.affected_siter,
                              "ticket count": len(tickets)})
 
     separator = "-" * 80
