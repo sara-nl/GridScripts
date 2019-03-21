@@ -24,6 +24,7 @@
 # 2018-09-14 - Onno - Added maximum upload file size option
 # 2018-11-02 - Onno - Load defaults from file
 # 2019-01-15 - Raymond Oonk - Fixed reference to view-macaroon
+# 2019-03-21 - Onno - Added --output qr; show macaroon properties in color
 
 usage() {
   cat <<-EOF
@@ -52,7 +53,8 @@ usage() {
 	  --output curl          - Print curl command(s) to use the data.
 	  --output rclone <name> - Save an rclone config file, <name>.conf.
 	                           You need rclone v1.42-012-gfa051ff9 or newer to use it.
-	  --debug                - Provide extra output to learn what's going on.
+	  --output qr <name>     - Create a QR PNG image based on the share link
+	  --debug                - Show what's going on.
 	
 	Macaroon properties are logged in ~/macaroons.log.
 	Their signature is not logged to prevent theft.
@@ -132,6 +134,9 @@ while [ $# -gt 0 ] ; do
       if [ "$output" == "rclone" ] ; then
         remote_name="$2"
         shift
+      elif [ "$output" == "qr" ] ; then
+        png_filename="$2"
+        shift
       fi
       shift
       ;;
@@ -199,6 +204,16 @@ case $output in
     fi
     if [ -z "$remote_name" ] ; then
       echo "If output is rclone, please specify a name for the remote." 1>&2
+      exit 1
+    fi
+    ;;
+  qr )
+    if [ ! -x "$(command -v qrencode)" ] ; then
+      echo 'Need `qrencode` for this option.' 1>&2
+      exit 1
+    fi
+    if [ -z "$png_filename" ] ; then
+      echo "If output is qr, please specify a name for the PNG file." 1>&2
       exit 1
     fi
     ;;
@@ -273,9 +288,13 @@ link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
 
 # Show contents of macaroon
 if [ -x view-macaroon ] ; then
+  BLUE='\e[34m'
+  RESET='\e[39m'
+  echo -e "$BLUE"
   echo "=== View deserialized macaroon ==="
   view-macaroon "$macaroon"
   echo "=== End deserialized macaroon ==="
+  echo -e "$RESET"
   echo
 fi
 
@@ -332,6 +351,22 @@ case $output in
     echo "They need rclone v1.42-012-gfa051ff9 or newer to access the data."
     echo "Example command:"
     echo "rclone --config=$remote_name.conf ls $remote_name:"
+    ;;
+  qr )
+    if [[ $png_filename != *.png ]] ; then
+      png_filename="$png_filename.png"
+    fi
+    # Generate QR image
+    echo "Creating QR image file: $png_filename"
+    if qrencode -o $png_filename "$link" ; then
+      # Try to open it in an image viewer
+      for imageviewer in feh display xdg-open eog Xming ; do
+        if [ -x "$(command -v $imageviewer)" ] ; then
+          $imageviewer $png_filename
+          break
+        fi
+      done
+    fi
     ;;
   * )
     echo "Unrecognised output format '$output'." 1>&2
