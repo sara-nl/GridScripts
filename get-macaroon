@@ -25,6 +25,7 @@
 # 2018-11-02 - Onno - Load defaults from file
 # 2019-01-15 - Raymond Oonk - Fixed reference to view-macaroon
 # 2019-03-21 - Onno - Added --output qr; show macaroon properties in color
+# 2019-03-22 - Onno - QR option more flexible; fixed executable tests
 
 usage() {
   cat <<-EOF
@@ -53,7 +54,8 @@ usage() {
 	  --output curl          - Print curl command(s) to use the data.
 	  --output rclone <name> - Save an rclone config file, <name>.conf.
 	                           You need rclone v1.42-012-gfa051ff9 or newer to use it.
-	  --output qr <name>     - Create a QR PNG image based on the share link
+	  --output qr <name>     - Create a QR PNG image based on the share link.
+          --output qr display    - Create a QR PNG image and show it now.
 	  --debug                - Show what's going on.
 	
 	Macaroon properties are logged in ~/macaroons.log.
@@ -176,7 +178,7 @@ fi
 
 if $proxy ; then
   # Check if the proxy is still valid; if not, exit after the error message.
-  if [ -x voms-proxy-info ]; then
+  if [ -x $(command -v voms-proxy-info) ]; then
     voms-proxy-info --exists 1>&2 || exit 1
   fi
   authn="--capath /etc/grid-security/certificates/ --cert $X509_USER_PROXY --cacert $X509_USER_PROXY"
@@ -198,7 +200,7 @@ case $output in
     # output format OK
     ;;
   rclone )
-    if [ ! -x rclone ]; then
+    if [ ! -x $(command -v rclone) ]; then
       echo 'rclone not found in $PATH.' 1>&2
       exit 1
     fi
@@ -268,7 +270,7 @@ if ! echo "$result" | grep --silent "targetWithMacaroon" ; then
   {
     echo "ERROR: could not get share link from $server."
     # Show output from server in the nicest way possible
-    if [ -x html2text ]; then
+    if [ -x $(command -v html2text) ]; then
       echo "$result" | html2text
     else
       echo "$result"
@@ -287,7 +289,7 @@ macaroon=$(echo "$result" | jq -r '.macaroon')
 link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
 
 # Show contents of macaroon
-if [ -x view-macaroon ] ; then
+if [ -x $(command -v view-macaroon) ] ; then
   BLUE='\e[34m'
   RESET='\e[39m'
   echo -e "$BLUE"
@@ -299,7 +301,7 @@ if [ -x view-macaroon ] ; then
 fi
 
 # Log macaroon properties in a (private) file; strip signature to prevent theft
-if [ -x view-macaroon ] ; then
+if [ -x $(command -v view-macaroon) ] ; then
   {
     echo "=== $(date) ==="
     view-macaroon "$macaroon" | grep -v signature
@@ -359,13 +361,21 @@ case $output in
     # Generate QR image
     echo "Creating QR image file: $png_filename"
     if qrencode -o $png_filename "$link" ; then
-      # Try to open it in an image viewer
-      for imageviewer in feh display xdg-open eog Xming ; do
-        if [ -x "$(command -v $imageviewer)" ] ; then
-          $imageviewer $png_filename
-          break
-        fi
-      done
+      # If the name is "display[.png]", the user wants to see it now!
+      if [ "$png_filename" = "display.png" ] ; then
+        # Try to open it in an image viewer
+        for imageviewer in feh display xdg-open eog Xming ; do
+          if [ -x "$(command -v $imageviewer)" ] ; then
+            $imageviewer $png_filename
+            break
+          fi
+        done
+      else  # User does not need to see it now. Show filename.
+        echo "Created QR image file: $png_filename"
+      fi
+    else
+      echo "ERROR: Could not create QR file."
+      exit 1
     fi
     ;;
   * )
