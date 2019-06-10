@@ -57,6 +57,7 @@ COPY myvo.eu-voms.grid.sara.nl /etc/vomses/myvo.eu-voms.grid.sara.nl
 # not the case, then use passive gridftp.
 EXPOSE 20000-25000
 ENV GLOBUS_TCP_PORT_RANGE 20000,25000
+ENV X509_USER_PROXY=/tmp/x509up_u0
 
 COPY ./startui.sh /root
 ENTRYPOINT ["/root/startui.sh"]
