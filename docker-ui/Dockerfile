@@ -22,13 +22,10 @@ RUN yum install -y ui
 RUN yum update -y
 
 #Add macaroon stuff
-RUN yum install wget -y
 RUN yum install html2text python-setuptools jq rclone python-pip -y
 RUN pip install pymacaroons
-RUN wget https://raw.githubusercontent.com/sara-nl/GridScripts/master/get-macaroon
-RUN wget https://raw.githubusercontent.com/sara-nl/GridScripts/master/view-macaroon
-COPY get-macaroon /usr/local/bin/get-macaroon
-COPY view-macaroon /usr/local/bin/view-macaroon
+RUN wget https://raw.githubusercontent.com/sara-nl/GridScripts/master/get-macaroon -O /usr/local/bin/get-macaroon
+RUN wget https://raw.githubusercontent.com/sara-nl/GridScripts/master/view-macaroon -O /usr/local/bin/view-macaroon
 RUN chmod 755 /usr/local/bin/get-macaroon
 RUN chmod 755 /usr/local/bin/view-macaroon
 
