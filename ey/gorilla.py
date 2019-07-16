@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+# Get the latest version from the following URL:
+#     https://github.com/alvarolopez/ggus_report_generator
+# AUTHOR: Alvaro Lopez <aloga@ifca.unican.es>
+
 from __future__ import print_function
 
 import argparse
@@ -15,6 +19,17 @@ __version__ = 20141002
 SUPPORT_UNIT = "NGI_NL"
 SITE = "SARA-MATRIX"
 
+#message_header = """
+### Status GGUS tickets ###
+#There are %(ticket count)s open tickets under %(support_unit)s scope. Please
+#find below a short summary of them. Please take the appropriate actions:
+#    - Change the ticket status from "ASSIGNED" to "IN PROGRESS".
+#    - Provide feedback on the issue as regularly as possible.
+#    - In case of problems, ask for help in <ibergrid-ops@listas.cesga.es>
+#    - For long pending issues, put your site/node in downtime.
+#    - Do not forget to close the ticket when you have solved the problem.
+#"""
+
 message_header = """
 ### GGUS tickets for %(site_title)s ###
 There are %(ticket count)s tickets %(text)s for %(site)s.
@@ -29,12 +44,14 @@ class GGUSTicket(object):
     site_tag = "SITE"
 
     body_template = """%(title)s: %(affected_site)s
-      GGUS ID     : %(request_id)s
-      Open since  : %(date_of_creation)s UTC
+      GGUS ID     : %(ticket_id)s
       Last update : %(last_update)s UTC
+      Scope       : %(scope)s
+      Type        : %(ttype)s
       Status      : %(status)s
       Description : %(subject)s
-      Link        : https://ggus.eu/ws/ticket_info.php?ticket=%(request_id)s"""
+      VO          : %(vo)s
+      Link        : https://ggus.eu/ws/ticket_info.php?ticket=%(ticket_id)s"""
 
     def __init__(self, ticket, support_unit):
         self.ticket = ticket
@@ -51,35 +68,45 @@ class GGUSTicket(object):
 
     @property
     def affected_site(self):
-        return self._get_by_xml_tag("affected_site")
-
-    @property
-    def date_of_creation(self):
-        return self._get_by_xml_tag("date_of_creation")
+        return self._get_by_xml_tag("Site")
 
     @property
     def last_update(self):
-        return self._get_by_xml_tag("last_update")
+        return self._get_by_xml_tag("Last_Update")
 
     @property
     def status(self):
-        return self._get_by_xml_tag("status")
+        return self._get_by_xml_tag("Status")
 
     @property
     def subject(self):
-        return self._get_by_xml_tag("subject")
+        return self._get_by_xml_tag("Subject")
 
     @property
-    def request_id(self):
-        return self._get_by_xml_tag("request_id")
+    def ticket_id(self):
+        return self._get_by_xml_tag("Ticket-ID")
+
+    @property
+    def ttype(self):
+        return self._get_by_xml_tag("Type")
+
+    @property
+    def scope(self):
+        return self._get_by_xml_tag("Scope")
+
+    @property
+    def vo(self):
+        return self._get_by_xml_tag("VO")
 
     def render(self):
         d = {
-            "request_id": self.request_id,
-            "date_of_creation": self.date_of_creation,
+            "ticket_id": self.ticket_id,
             "last_update": self.last_update,
             "status": self.status,
-            "subject": self.subject
+            "subject": self.subject,
+            "scope": self.scope,
+            "vo": self.vo,
+            "ttype": self.ttype
         }
 
         if self.affected_site:

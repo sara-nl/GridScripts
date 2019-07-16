@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 
+# Get the latest version from the following URL:
+#     https://github.com/alvarolopez/ggus_report_generator
+# AUTHOR: Alvaro Lopez <aloga@ifca.unican.es>
+
 from __future__ import print_function
 
 import argparse
@@ -22,6 +26,17 @@ __version__ = 20141002
 # Change it if you want to use it for your NGI without specifing
 # it in the command-line
 SUPPORT_UNIT = "NGI_NL"
+
+#message_header = """
+### Open GGUS tickets ###
+#There are %(ticket count)s open tickets under %(support_unit)s scope. Please
+#find below a short summary of them. Please take the appropriate actions:
+#    - Change the ticket status from "ASSIGNED" to "IN PROGRESS".
+#    - Provide feedback on the issue as regularly as possible.
+#    - In case of problems, ask for help in <ibergrid-ops@listas.cesga.es>
+#    - For long pending issues, put your site/node in downtime.
+#    - Do not forget to close the ticket when you have solved the problem.
+#"""
 
 message_header = """
 ### new GGUS tickets ###
@@ -54,17 +69,19 @@ def send_mail(send_from, send_to, subject, text, files=[], server="localhost"):
 class GGUSReportException(Exception):
     pass
 
-
 class GGUSTicket(object):
     support_unit_tag = "SUPPORT UNIT"
     site_tag = "SITE"
 
     body_template = """%(title)s: %(affected_site)s
-      GGUS ID     : %(request_id)s
-      Open since  : %(date_of_creation)s UTC
+      GGUS ID     : %(ticket_id)s
+      Last update : %(last_update)s UTC
+      Scope       : %(scope)s
+      Type        : %(ttype)s
       Status      : %(status)s
       Description : %(subject)s
-      Link        : https://ggus.eu/ws/ticket_info.php?ticket=%(request_id)s"""
+      VO          : %(vo)s
+      Link        : https://ggus.eu/ws/ticket_info.php?ticket=%(ticket_id)s"""
 
     def __init__(self, ticket, support_unit):
         self.ticket = ticket
@@ -81,30 +98,45 @@ class GGUSTicket(object):
 
     @property
     def affected_site(self):
-        return self._get_by_xml_tag("affected_site")
+        return self._get_by_xml_tag("Site")
 
     @property
-    def date_of_creation(self):
-        return self._get_by_xml_tag("date_of_creation")
+    def last_update(self):
+        return self._get_by_xml_tag("Last_Update")
 
     @property
     def status(self):
-        return self._get_by_xml_tag("status")
+        return self._get_by_xml_tag("Status")
 
     @property
     def subject(self):
-        return self._get_by_xml_tag("subject")
+        return self._get_by_xml_tag("Subject")
 
     @property
-    def request_id(self):
-        return self._get_by_xml_tag("request_id")
+    def ticket_id(self):
+        return self._get_by_xml_tag("Ticket-ID")
+
+    @property
+    def ttype(self):
+        return self._get_by_xml_tag("Type")
+
+    @property
+    def scope(self):
+        return self._get_by_xml_tag("Scope")
+
+    @property
+    def vo(self):
+        return self._get_by_xml_tag("VO")
 
     def render(self):
         d = {
-            "request_id": self.request_id,
-            "date_of_creation": self.date_of_creation,
+            "ticket_id": self.ticket_id,
+            "last_update": self.last_update,
             "status": self.status,
-            "subject": self.subject
+            "subject": self.subject,
+            "scope": self.scope,
+            "vo": self.vo,
+            "ttype": self.ttype
         }
 
         if self.affected_site:
@@ -114,24 +146,28 @@ class GGUSTicket(object):
             d["title"] = self.support_unit_tag
             d["affected_site"] =  self.support_unit
 
-        return self.body_template % d,d
+        return self.body_template % d
+
+
+
 
 class GGUSConnection(object):
     url = ("https://ggus.eu/index.php?mode=ticket_search&ticket_id="
            "&supportunit=%(support_unit)s&su_hierarchy=0&vo=all&user="
            "&keyword=&involvedsupporter=&assignedto=&affectedsite="
-           "&specattrib=none&status=open&priority=&typeofproblem=all"
+           "&specattrib=none&status=%(status)s&priority=&typeofproblem=all"
            "&ticket_category=all&mouarea=&date_type=creation+date"
-           "&tf_radio=1&timeframe=any&from_date=&to_date=&untouched_date="
+           "&tf_radio=1&timeframe=lastmonth&from_date=&to_date=&untouched_date="
            "&orderticketsby=REQUEST_ID&orderhow=desc&search_submit=GO%%21"
            "&writeFormat=XML")
 
-    def __init__(self, user, password, support_unit):
+    def __init__(self, user, password, support_unit, status='open'):
         self.session = None
         self.user = user
         self.password = password
         self.support_unit = support_unit
-        self.url = self.url % {"support_unit": support_unit}
+        self.status = status
+        self.url = self.url % {"support_unit": support_unit,"status": status}
 
     def _get_ggus_session(self):
         s = requests.Session()
@@ -216,21 +252,33 @@ def main():
     our_tickets = []
     for ticket in tickets:
         if ticket.status=='assigned':
-            if not ticket.affected_site:
-                our_tickets.append(ticket)
-                continue
-            if ticket.affected_site=='SARA-MATRIX' or re.search('LSG\-.+',ticket.affected_site)!=None:
+#            if not ticket.affected_site:
+#                our_tickets.append(ticket)
+#                continue
+            if ticket.affected_site=='SARA-MATRIX':
                 our_tickets.append(ticket)
                 continue
         else:
-            c.execute("delete from tickets where id==%s" % ticket.request_id)
+            c.execute("delete from tickets where id==%s" % ticket.ticket_id)
             conn.commit()
 
+    ggus = GGUSConnection(args.username,
+                          args.password,
+                          args.support_unit,
+                          'terminal')
+
+    closed_tickets = ggus.tickets()
+    for ticket in closed_tickets:
+        c.execute("delete from tickets where id==%s" % ticket.ticket_id)
+        conn.commit()
+
+
     new_tickets=[]
+    
     for ticket in our_tickets:
-        if ticket.request_id not in ids:
+        if ticket.ticket_id not in ids:
             new_tickets.append(ticket)
-            c.execute("insert into tickets (id) values(%s)" % ticket.request_id)
+            c.execute("insert into tickets (id) values(%s)" % ticket.ticket_id)
     if len(new_tickets)!=0:
         conn.commit()
     conn.close()
@@ -244,12 +292,13 @@ def main():
         if not ticket.affected_site:
             su_tickets.append(ticket)
             continue
-        t,d=ticket.render()
-        text=text+'\n'+t+separator
+      
+        t=ticket.render()
+        text=text+'\n'+t+'\n'+separator
       
 
     for ticket in su_tickets:
-        t,d=ticket.render()
+        t=ticket.render()
         text=text+'\n'+t+'\n'+separator
 
     if len(new_tickets)!=0:
@@ -257,10 +306,10 @@ def main():
 
     subject="GRID: New GGUS tickets:"
     for ticket in new_tickets:
-        subject=subject+' '+str(ticket.request_id)
+        subject=subject+' '+str(ticket.ticket_id)
 
     if len(new_tickets)!=0:
-        send_mail('',['',''],subject,text)
-
+#        send_mail('ey@surfsara.nl',['helpdesk@surfsara.nl','grid-adm@surfsara.nl'],subject,text)
+        send_mail('ey@surfsara.nl',['ron.trompert@surfsara.nl'],subject,text)
 if __name__ == "__main__":
     main()
