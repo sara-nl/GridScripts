@@ -1,6 +1,6 @@
 # Dockerfile to create a container with the UMD UI service
 #
-# Built the container by:
+# Build the container by:
 # docker build -t docker-ui .
 #
 # Run it by:
