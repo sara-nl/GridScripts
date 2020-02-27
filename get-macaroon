@@ -51,11 +51,12 @@ usage() {
 	                           a new private window, to be certain you're authenticated
 	                           by the macaroon and not by x509 or username/password.
 	  --output macaroon      - Print authentication token only.
+	  --output file <name>   - Save macaroon in a file.
 	  --output curl          - Print curl command(s) to use the data.
 	  --output rclone <name> - Save an rclone config file, <name>.conf.
 	                           You need rclone v1.42-012-gfa051ff9 or newer to use it.
 	  --output qr <name>     - Create a QR PNG image based on the share link.
-          --output qr display    - Create a QR PNG image and show it now.
+	  --output qr display    - Create a QR PNG image and show it now.
 	  --debug                - Show what's going on.
 	
 	Macaroon properties are logged in ~/macaroons.log.
@@ -133,7 +134,10 @@ while [ $# -gt 0 ] ; do
     --output )
       output="$2"
       shift
-      if [ "$output" == "rclone" ] ; then
+      if [ "$output" == "file" ] ; then
+        filename="$2"
+        shift
+      elif [ "$output" == "rclone" ] ; then
         remote_name="$2"
         shift
       elif [ "$output" == "qr" ] ; then
@@ -198,6 +202,12 @@ fi
 case $output in
   link|macaroon|curl )
     # output format OK
+    ;;
+  file )
+    if [ -z "$filename" ] ; then
+      echo "If output is file, please specify a file name." 1>&2
+      exit 1
+    fi
     ;;
   rclone )
     if [ ! -x $(command -v rclone) ]; then
@@ -294,7 +304,7 @@ if [ -x $(command -v view-macaroon) ] ; then
   RESET='\e[39m'
   echo -e "$BLUE"
   echo "=== View deserialized macaroon ==="
-  view-macaroon "$macaroon"
+  view-macaroon <<<"$macaroon"
   echo "=== End deserialized macaroon ==="
   echo -e "$RESET"
   echo
@@ -304,7 +314,7 @@ fi
 if [ -x $(command -v view-macaroon) ] ; then
   {
     echo "=== $(date) ==="
-    view-macaroon "$macaroon" | grep -v signature
+    view-macaroon <<<"$macaroon" | grep -v signature
     echo -e "=====================================\n"
   } >> ~/macaroons.log
   chmod 600 ~/macaroons.log
@@ -319,6 +329,13 @@ case $output in
   macaroon )
     # Just the bare token, nothing else
     echo "$macaroon"
+    ;;
+  file )
+    # Save token in a file
+    touch "$filename"
+    chmod 600 "$filename"
+    echo "$macaroon" > "$filename"
+    echo "Macaroon saved in file '$filename'."
     ;;
   curl )
     # Show download and upload command with curl
