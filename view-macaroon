@@ -1,12 +1,27 @@
-#!/usr/bin/env python
+#!/usr/local/share/macaroon/bin/python3
 
-# This script decodes (or "deserializes") and prints a macaroon.
-# It uses pymacaroons, which can be installed on Centos 7 with:
+# This script decodes and prints a macaroon.
+# It uses pymacaroons, which can be installed with:
 # yum install python2-pip
 # pip install pymacaroons
 
-import sys
+import sys, os
 from pymacaroons import Macaroon
 
-m = Macaroon.deserialize(sys.argv[1])
-print(m.inspect())
+if len(sys.argv) > 1:
+    for arg in sys.argv[1:]:
+        # Is this argument a filename or a macaroon?
+        if os.path.isfile(arg):
+            # Filename. Treat the contents as the macaroon.
+            with open(arg, 'r') as file:
+                data = file.read().rstrip('\n')
+            m = Macaroon.deserialize(data)
+        else:
+            # A literal macaroon.
+            m = Macaroon.deserialize(arg)
+        print(m.inspect())
+else:
+    # No arguments provided, let's try to read from stdin.
+    for line in sys.stdin:
+        m = Macaroon.deserialize(line.rstrip())
+        print(m.inspect())
