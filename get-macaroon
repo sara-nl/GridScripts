@@ -194,10 +194,23 @@ else
   authn="-u $user"
 fi
 
-if ! echo "$duration" | grep --silent --perl-regex '^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d+[HMS])(\d+H)?(\d+M)?(\d+S)?)?$' ; then
-  echo "Duration should be in ISO8601 duration format. Examples: PT5M (5 minutes), P1Y2M (1 year and 2 months)" 1>&2
-  exit 1
-fi
+# The grep in OSX does not support --perl-regex, so we give it a slightly simpler regex.
+case $OSTYPE in
+  darwin* )
+    if ! echo "$duration" | grep -E --silent '^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+S)?)?$' ; then
+      echo "Duration should be in ISO8601 duration format. Examples: PT5M (5 minutes), P1Y2M (1 year and 2 months)" 1>&2
+      exit 1
+    fi
+    ;;
+  * )
+    if ! echo "$duration" \
+         | grep --silent --perl-regex '^P(?=\d+[YMWD])(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d+[HMS])(\d+H)?(\d+M)?(\d+S)?)?$'
+    then
+      echo "Duration should be in ISO8601 duration format. Examples: PT5M (5 minutes), P1Y2M (1 year and 2 months)" 1>&2
+      exit 1
+    fi
+    ;;
+esac
 
 case $output in
   link|macaroon|curl )
@@ -299,7 +312,7 @@ macaroon=$(echo "$result" | jq -r '.macaroon')
 link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
 
 # Show contents of macaroon
-if [ -x $(command -v view-macaroon) ] ; then
+if [ -x "$(command -v view-macaroon)" ] ; then
   BLUE='\e[34m'
   RESET='\e[39m'
   echo -e "$BLUE"
@@ -308,10 +321,8 @@ if [ -x $(command -v view-macaroon) ] ; then
   echo "=== End deserialized macaroon ==="
   echo -e "$RESET"
   echo
-fi
-
-# Log macaroon properties in a (private) file; strip signature to prevent theft
-if [ -x $(command -v view-macaroon) ] ; then
+  #
+  # Log macaroon properties in a (private) file; strip signature to prevent theft
   {
     echo "=== $(date) ==="
     view-macaroon <<<"$macaroon" | grep -v signature
