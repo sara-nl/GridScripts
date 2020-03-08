@@ -36,6 +36,8 @@ usage() {
 	  --chroot               - Make specified path the root diectory, hiding upper dirs
 	  --proxy                - Use proxy specified in X509_USER_PROXY
 	  --user <username>      - Username/password authentication
+	  --netrc [filename]     - Authenticate with a curl netrc file.
+	                           If no filename was provided, use ~/.netrc.
 	  --permissions <list>   - Comma separated list of allowed activities
 	                           DOWNLOAD,UPLOAD,DELETE,MANAGE,LIST,
 	                           READ_METADATA,UPDATE_METADATA
@@ -78,8 +80,8 @@ usage() {
 url=
 path_or_root='path'
 activity=DOWNLOAD,LIST
+auth_method=
 user=
-proxy=false
 duration=PT12H  # Default: 12 hours
 ip=
 output='link'
@@ -108,11 +110,26 @@ while [ $# -gt 0 ] ; do
       ;;
     --user )
       user="$2"
-      proxy=false
-      shift 2
+      auth_method=user
+      shift ; shift
+      ;;
+    --netrc )
+      auth_method=netrc
+      case $2 in
+        --* | '' )
+          # Next argument is another option or absent; not a file name
+          netrcfile=~/.netrc
+          ;;
+        * )
+          # This must be a file name
+          netrcfile="$2"
+          shift
+          ;;
+      esac
+      shift
       ;;
     --proxy )
-      proxy=true
+      auth_method=proxy
       shift
       ;;
     --permissions )
@@ -164,13 +181,66 @@ if [ -z "$url" ] ; then
   usage
 fi
 
-if [ -n "$user" -a "$proxy" == "true" ] ; then
-  echo "ERROR: you can't specify both --user and --proxy." 1>&2
-  exit 1
-fi
+case $auth_method in
+  netrc )
+    if [ ! -f "$netrcfile" ] ; then
+      echo "ERROR: could not open netrc file '$netrcfile'."
+      exit 1
+    fi
+    authn="--netrc-file $netrcfile"
+    ;;
+  proxy )
+    if [ ! -f "$proxyfile" ] ; then
+      echo "ERROR: could not open proxy '$proxyfile'."
+      exit 1
+    fi
+    if [ ! -d /etc/grid-security/certificates ] ; then
+      echo "ERROR: could not find /etc/grid-security/certificates/." \
+           "Please install the Grid root certificates if you want to use your proxy."
+      exit 1
+    fi
+    # Check if the proxy is still valid; if not, exit after the error message.
+    if [ -x "$(command -v voms-proxy-info)" ]; then
+      voms-proxy-info --exists 1>&2 || exit 1
+    fi
+    authn="--capath /etc/grid-security/certificates/ --cert $X509_USER_PROXY --cacert $X509_USER_PROXY"
+    ;;
+  user )
+    authn="-u $user"
+    ;;
+  token )
+    # We can't specify the token as a command line argument,
+    # because others could read that with the ps command.
+    # So we have to put the authorization header in a temporary file.
+    # The mktemp command differs on OSX.
+    curl_authorization_header_file=$(mktemp authorization_header_XXXXXXXXXXXX)
+    chmod 600 "$curl_authorization_header_file"
+    # File should be cleaned up when we're done,
+    # unless we're debugging
+    if $debug ; then
+      trap "{
+              echo
+              echo 'WARNING: in debug mode, the authorization header file' \
+                   '$curl_authorization_header_file will not be cleaned up.' \
+                   'Please clean it up yourself.'
+            }" EXIT
+    else
+      trap 'rm -f "$curl_authorization_header_file"' EXIT
+    fi
+    # Save the header in the file
+    echo "header \"Authorization: Bearer $token\"" > "$curl_authorization_header_file"
+    # Refer to the file with the header
+    authn="--config $curl_authorization_header_file"
+    ;;
+  * )
+    echo "ERROR: you have to specify a valid authentication method."
+    exit 1
+    ;;
+esac
+
 
 server=$(echo "$url" | egrep -o 'https://[^/]+/')
-dir=$(echo "$url" | sed -e 's#https://[^/]\+##')
+dir=$(echo "$url" | sed -e 's#https://[^/]*##')
 if [ -z "$dir" ] ; then
   dir=/
 fi
@@ -180,24 +250,24 @@ if [ -z "$server" ] ; then
   exit 1
 fi
 
-if $proxy ; then
-  # Check if the proxy is still valid; if not, exit after the error message.
-  if [ -x $(command -v voms-proxy-info) ]; then
-    voms-proxy-info --exists 1>&2 || exit 1
-  fi
-  authn="--capath /etc/grid-security/certificates/ --cert $X509_USER_PROXY --cacert $X509_USER_PROXY"
-else
-  if [ -z "$user" ] ; then
-    echo "Please specify --proxy, or specify a username with --user." 1>&2
-    exit 1
-  fi
-  authn="-u $user"
-fi
-
-if ! echo "$duration" | grep --silent --perl-regex '^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d+[HMS])(\d+H)?(\d+M)?(\d+S)?)?$' ; then
-  echo "Duration should be in ISO8601 duration format. Examples: PT5M (5 minutes), P1Y2M (1 year and 2 months)" 1>&2
-  exit 1
-fi
+# Checking the duration; should be ISO8601 format.
+# The grep in OSX does not support --perl-regex, so we give it a slightly simpler regex.
+case $OSTYPE in
+  darwin* )
+    if ! echo "$duration" | grep -E --silent '^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+S)?)?$' ; then
+      echo "Duration should be in ISO8601 duration format. Examples: PT5M (5 minutes), P1Y2M (1 year and 2 months)" 1>&2
+      exit 1
+    fi
+    ;;
+  * )
+    if ! echo "$duration" \
+         | grep --silent --perl-regex '^P(?=\d+[YMWD])(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d+[HMS])(\d+H)?(\d+M)?(\d+S)?)?$'
+    then
+      echo "Duration should be in ISO8601 duration format. Examples: PT5M (5 minutes), P1Y2M (1 year and 2 months)" 1>&2
+      exit 1
+    fi
+    ;;
+esac
 
 case $output in
   link|macaroon|curl )
@@ -210,7 +280,7 @@ case $output in
     fi
     ;;
   rclone )
-    if [ ! -x $(command -v rclone) ]; then
+    if [ ! -x "$(command -v rclone)" ]; then
       echo 'rclone not found in $PATH.' 1>&2
       exit 1
     fi
@@ -280,7 +350,7 @@ if ! echo "$result" | grep --silent "targetWithMacaroon" ; then
   {
     echo "ERROR: could not get share link from $server."
     # Show output from server in the nicest way possible
-    if [ -x $(command -v html2text) ]; then
+    if [ -x "$(command -v html2text)" ]; then
       echo "$result" | html2text
     else
       echo "$result"
@@ -299,7 +369,7 @@ macaroon=$(echo "$result" | jq -r '.macaroon')
 link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
 
 # Show contents of macaroon
-if [ -x $(command -v view-macaroon) ] ; then
+if [ -x "$(command -v view-macaroon)" ] ; then
   BLUE='\e[34m'
   RESET='\e[39m'
   echo -e "$BLUE"
@@ -308,10 +378,8 @@ if [ -x $(command -v view-macaroon) ] ; then
   echo "=== End deserialized macaroon ==="
   echo -e "$RESET"
   echo
-fi
-
-# Log macaroon properties in a (private) file; strip signature to prevent theft
-if [ -x $(command -v view-macaroon) ] ; then
+  #
+  # Log macaroon properties in a (private) file; strip signature to prevent theft
   {
     echo "=== $(date) ==="
     view-macaroon <<<"$macaroon" | grep -v signature
