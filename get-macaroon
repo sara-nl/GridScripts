@@ -26,6 +26,8 @@
 # 2019-01-15 - Raymond Oonk - Fixed reference to view-macaroon
 # 2019-03-21 - Onno - Added --output qr; show macaroon properties in color
 # 2019-03-22 - Onno - QR option more flexible; fixed executable tests
+# 2020-03-07 - Onno - Added --netrc option
+# 2020-03-09 - Onno - Check for view-macaroon in same dir as get-macaroon
 
 usage() {
   cat <<-EOF
@@ -77,6 +79,7 @@ usage() {
   exit 1
 }
 
+script_dir=$(dirname "$0")
 url=
 path_or_root='path'
 activity=DOWNLOAD,LIST
@@ -369,12 +372,18 @@ macaroon=$(echo "$result" | jq -r '.macaroon')
 link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
 
 # Show contents of macaroon
-if [ -x "$(command -v view-macaroon)" ] ; then
-  BLUE='\e[34m'
-  RESET='\e[39m'
+if [ -x "${script_dir}/view-macaroon" ] ; then
+  macaroon_viewer="${script_dir}/view-macaroon"
+else
+  macaroon_viewer="$(command -v view-macaroon)"
+fi
+echo "Macaroon viewer: $macaroon_viewer"
+if [ -x "$macaroon_viewer" ] ; then
+  BLUE=$'\e[34m'
+  RESET=$'\e[39m'
   echo -e "$BLUE"
   echo "=== View deserialized macaroon ==="
-  view-macaroon <<<"$macaroon"
+  $macaroon_viewer <<<"$macaroon"
   echo "=== End deserialized macaroon ==="
   echo -e "$RESET"
   echo
@@ -382,7 +391,7 @@ if [ -x "$(command -v view-macaroon)" ] ; then
   # Log macaroon properties in a (private) file; strip signature to prevent theft
   {
     echo "=== $(date) ==="
-    view-macaroon <<<"$macaroon" | grep -v signature
+    $macaroon_viewer <<<"$macaroon" | grep -v signature
     echo -e "=====================================\n"
   } >> ~/macaroons.log
   chmod 600 ~/macaroons.log
