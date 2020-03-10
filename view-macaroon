@@ -5,7 +5,7 @@
 # yum install python2-pip
 # pip install pymacaroons
 
-import sys, os
+import sys, os, re
 from pymacaroons import Macaroon
 
 if len(sys.argv) > 1:
@@ -14,14 +14,21 @@ if len(sys.argv) > 1:
         if os.path.isfile(arg):
             # Filename. Treat the contents as the macaroon.
             with open(arg, 'r') as file:
-                data = file.read().rstrip('\n')
-            m = Macaroon.deserialize(data)
+                for line in file:
+                    # Does this line contain a macaroon?
+                    token = re.search("MDA\S*", line)
+                    if token:
+                        m = Macaroon.deserialize (token.group())
+                        print(m.inspect())
         else:
             # A literal macaroon.
             m = Macaroon.deserialize(arg)
-        print(m.inspect())
+            print(m.inspect())
 else:
     # No arguments provided, let's try to read from stdin.
     for line in sys.stdin:
-        m = Macaroon.deserialize(line.rstrip())
-        print(m.inspect())
+        # Does this line contain a macaroon?
+        token = re.search("MDA\S*", line)
+        if token:
+            m = Macaroon.deserialize (token.group())
+            print(m.inspect())
