@@ -28,6 +28,7 @@
 # 2019-03-22 - Onno - QR option more flexible; fixed executable tests
 # 2020-03-07 - Onno - Added --netrc option
 # 2020-03-09 - Onno - Check for view-macaroon in same dir as get-macaroon
+# 2020-03-31 - Juan Luis Font Calvo - Fix html2text call
 
 usage() {
   cat <<-EOF
@@ -354,7 +355,7 @@ if ! echo "$result" | grep --silent "targetWithMacaroon" ; then
     echo "ERROR: could not get share link from $server."
     # Show output from server in the nicest way possible
     if [ -x "$(command -v html2text)" ]; then
-      echo "$result" | html2text
+      echo "$result" | html2text /dev/stdin
     else
       echo "$result"
     fi
