@@ -194,8 +194,8 @@ case $auth_method in
     authn="--netrc-file $netrcfile"
     ;;
   proxy )
-    if [ ! -f "$proxyfile" ] ; then
-      echo "ERROR: could not open proxy '$proxyfile'."
+    if [ ! -f "$X509_USER_PROXY" ] ; then
+      echo "ERROR: could not open proxy '$X509_USER_PROXY'."
       exit 1
     fi
     if [ ! -d /etc/grid-security/certificates ] ; then
