@@ -50,6 +50,10 @@ usage() {
 	  --ip <subnet-list>     - Allow access from these addresses/subnets.
 	                           Multiple subnets may be specified, comma separated.
 	                           Don't forget IPv6.
+	                           The person whom the macaroon is for, can find the
+	                           external addresses of his/her system with this command:
+	                           curl -4 icanhazip.com ; curl -6 icanhazip.com
+	                           or by browsing to https://whatismyipaddress.com/.
 	  --max-file-size        - Set a maximum file size for uploads. dCache 5 required.
 	  --output link          - Print a link that anyone can open in a browser.
 	                           If you open the link in your browser, please do it in 
