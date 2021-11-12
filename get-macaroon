@@ -41,9 +41,16 @@ usage() {
 	  --user <username>      - Username/password authentication
 	  --netrc [filename]     - Authenticate with a curl netrc file.
 	                           If no filename was provided, use ~/.netrc.
-	  --permissions <list>   - Comma separated list of allowed activities
-	                           DOWNLOAD,UPLOAD,DELETE,MANAGE,LIST,
-	                           READ_METADATA,UPDATE_METADATA
+	  --permissions <list>   - Comma separated list of allowed activities. Example:
+	                           DOWNLOAD,LIST
+	                           These permissions can be given:
+	                           DOWNLOAD - Read a file
+	                           UPLOAD   - Write a file
+	                           DELETE   - Delete a file or directory
+	                           MANAGE   - Rename or move a file or directory
+	                           LIST     - List objects in a directory
+	                           READ_METADATA   - Read file status
+	                           UPDATE_METADATA - Stage a file, change QoS
 	  --duration             - Duration that the link will be valid, in ISO8601 format
 	                           See https://en.wikipedia.org/wiki/ISO_8601#Durations
 	                           The duration may be limited by the server.
