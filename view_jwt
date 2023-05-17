@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+
+import sys, os, re
+import jwt
+import json
+import arrow
+from datetime import datetime, timezone
+from dateutil import tz
+import pytz
+
+def human_readable_utc_timestamp(my_timestamp):
+    return datetime.utcfromtimestamp(my_timestamp).strftime('%Y-%m-%d %H:%M:%S UTC')
+
+def human_readable_local_timestamp(my_timestamp):
+    local_timezone = datetime.now(timezone.utc).astimezone().tzinfo
+    local_datetime = datetime.fromtimestamp(my_timestamp, tz=pytz.utc).astimezone(local_timezone)
+    return local_datetime.strftime('%Y-%m-%d %H:%M:%S %Z%z')
+
+def decode_jwt(token):
+    decoded_token = jwt.decode(token, algorithms=[], verify=False)  # Disable signature verification
+    # Make timestamps more readable
+    for timestamp_field in ['iat', 'nbf', 'exp']:
+        if decoded_token.get(timestamp_field):
+            decoded_token[timestamp_field] = human_readable_local_timestamp(decoded_token.get(timestamp_field))
+    formatted_token = json.dumps(decoded_token, indent=4)
+    return formatted_token
+
+if len(sys.argv) > 1:
+    for arg in sys.argv[1:]:
+        # Is this argument a filename or a JWT token?
+        if os.path.isfile(arg):
+            # Filename. Search it for JWT token(s).
+            with open(arg, 'r') as file:
+                for line in file:
+                    # Does this line contain a JWT token?
+                    jwt_token = re.search("eyJ\S*", line)
+                    if jwt_token:
+                        formatted_token = decode_jwt(jwt_token.group())
+                        print("Decoded token:")
+                        print(formatted_token)
+        else:
+            # A literal JWT token provided as argument.
+            jwt_token = re.search("eyJ\S*", arg)
+            if jwt_token:
+                formatted_token = decode_jwt(jwt_token.group())
+                print("Decoded token:")
+                print(formatted_token)
+else:
+    # No arguments provided, let's try to read from stdin.
+    for line in sys.stdin:
+        # Does this line contain a JWT token?
+        jwt_token = re.search("eyJ\S*", line)
+        if jwt_token:
+            formatted_token = decode_jwt(jwt_token.group())
+            print("Decoded token:")
+            print(formatted_token)
