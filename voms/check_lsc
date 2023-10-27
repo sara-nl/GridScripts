@@ -1,0 +1,126 @@
+#!/bin/bash
+
+usage () {
+  cat <<-EOF
+	Checks whether local LSC files and VOMS server info match.
+	Usage:
+	  $0 [VO] [--verbose]
+	Options:
+	  VO        - Check only this Virtual Organisation
+	              Default: check LSC files of all VOs.
+	  --errors  - Show all errors (LSC mismatches and VOMS server errors)
+	              Default: show only LSC mismatches
+	  --verbose - Show everything: errors and successes.
+	              Default: show only LSC mismatches
+	EOF
+  exit 1
+}
+
+# Eye candy. Not all editors may show them properly.
+icon_checkmark='✅'
+icon_redcross='❌'
+icon_question='❓'
+
+# Some default values
+VOMSDIR=/etc/grid-security/vomsdir/
+dirs="$VOMSDIR/*"
+verbose=false
+errors=false
+
+while [ $# -gt 0 ] ; do
+  case "$1" in
+    --help | -h | -help )
+      usage
+      ;;
+    --verbose )
+      verbose=true
+      errors=true
+      shift
+      ;;
+    --errors )
+      errors=true
+      shift
+      ;;
+    --* )
+      echo "ERROR: unknow option '$1'"
+      usage
+      ;;
+    * )
+      vo="$1"
+      dirs="$VOMSDIR/$1"
+      shift
+      ;;
+  esac
+done
+
+
+
+
+get_voms_admin_lsc_info () {
+  vo="$1"
+  voms_server="$2"
+  result=$(curl --silent --connect-timeout 10 --location --fail --silent --show-error \
+                --capath /etc/grid-security/certificates/ \
+                --cert /etc/grid-security/hostcert.pem \
+                --key  /etc/grid-security/hostkey.pem \
+                "https://${voms_server}:8443/voms/${vo}/configuration/configuration.action" 2>&1
+          )
+  # Did curl return an error?
+  if grep --silent '^curl:' <<<"$result" ; then
+    # Just show the error.
+    echo "$result"
+    return 1
+  else
+    # Show the LSC info extracted from the page.
+    echo "$result" \
+    | grep -A 10 'LSC configuration' \
+    | grep -A2 '<textarea' \
+    | sed -e 's@<.*>@@g' \
+    | grep .
+    return 0
+  fi
+}
+
+
+for dir in $dirs ; do
+  $verbose && echo
+  vo=$(basename "$dir")
+  if [ -z "$(ls -A $dir/*.lsc 2>/dev/null)" ] ; then
+    $verbose && echo "$icon_redcross Dir $dir does not contain any LSC files. It can probably be removed."
+    continue
+  fi
+  for lscfile in $dir/*.lsc ; do
+    prefix="=== $vo/$(basename "$lscfile") =>"
+    # Read local LSC file but filter empty lines and comments
+    lsc_file_info=$(grep -v -e '^$' -e '^#' "$lscfile")
+    # Read LSC info from the VOMS server
+    voms_server=$(sed -e 's@.*/@@' -e 's@.lsc@@' <<<"$lscfile")
+    lsc_live_info=$(get_voms_admin_lsc_info "$vo" "$voms_server")
+    # Empty? We couldn't read from the VOMS server. Report and skip.
+    if [ -z "$lsc_live_info" ] ; then
+      $errors && echo "$prefix❓$icon_question Could not read from https://${voms_server}:8443/voms/${vo}/configuration/configuration.action"
+      continue
+    fi
+    # A curl error, possibly 404. VO might be unknown to this VOMS server.
+    if grep --silent '^curl:' <<<"$lsc_live_info" ; then
+      if $errors ; then
+        echo -n "$prefix $icon_question Error reading https://${voms_server}:8443/voms/${vo}/configuration/configuration.action - "
+        sed -e 's/curl: .* The requested URL returned error://' <<<"$lsc_live_info"
+      fi
+      continue
+    fi
+    # We got info from the VOMS server. Let's compare!
+    diff=$(diff <(echo -e "$lsc_file_info") <(echo -e "$lsc_live_info") )
+    if [ -n "$diff" ] ; then
+      echo "$prefix $icon_redcross LSC info does not match."
+      {
+        echo "== $lscfile =="
+        echo "$lsc_file_info"
+        echo "== https://${voms_server}:8443/voms/${vo}/configuration/configuration.action =="
+        echo "$lsc_live_info"
+      } | sed -e 's@^/@  /@' -e 's/^/  /'
+    else
+      $verbose && echo "$prefix $icon_checkmark OK"
+    fi 
+  done
+done
