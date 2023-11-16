@@ -4,7 +4,7 @@ usage () {
   cat <<-EOF
 	Checks whether local LSC files and VOMS server info match.
 	Usage:
-	  $0 [VO] [--verbose]
+	  $0 [VO] [--errors|--verbose]
 	Options:
 	  VO        - Check only this Virtual Organisation
 	              Default: check LSC files of all VOs.
