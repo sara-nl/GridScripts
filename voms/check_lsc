@@ -93,6 +93,12 @@ for dir in $dirs ; do
     prefix="=== $vo/$(basename "$lscfile") =>"
     # Read local LSC file but filter empty lines and comments
     lsc_file_info=$(grep -v -e '^$' -e '^#' "$lscfile")
+    # The LSC file should be at least two lines.
+    # An empty LSC file can break dCache! We want to see this!
+    if [ -z "$lsc_file_info" ] ; then
+      $errors && echo "$prefix $icon_question WARNING: file $lscfile seems to be empty."
+      continue
+    fi
     # Read LSC info from the VOMS server
     voms_server=$(sed -e 's@.*/@@' -e 's@.lsc@@' <<<"$lscfile")
     lsc_live_info=$(get_voms_admin_lsc_info "$vo" "$voms_server")
