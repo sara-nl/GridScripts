@@ -4,7 +4,7 @@ usage () {
   cat <<-EOF
 	Checks whether local LSC files and VOMS server info match.
 	Usage:
-	  $0 [VO] [--errors|--verbose]
+	  $0 [VO] [--errors|--verbose] [--debug]
 	Options:
 	  VO        - Check only this Virtual Organisation
 	              Default: check LSC files of all VOs.
@@ -12,6 +12,7 @@ usage () {
 	              Default: show only LSC mismatches
 	  --verbose - Show everything: errors and successes.
 	              Default: show only LSC mismatches
+	  --debug   - Show HTTPS operations
 	EOF
   exit 1
 }
@@ -26,6 +27,7 @@ VOMSDIR=/etc/grid-security/vomsdir/
 dirs="$VOMSDIR/*"
 verbose=false
 errors=false
+debug=false
 
 while [ $# -gt 0 ] ; do
   case "$1" in
@@ -41,6 +43,12 @@ while [ $# -gt 0 ] ; do
       errors=true
       shift
       ;;
+    --debug )
+      debug=true
+      verbose=true
+      errors=true
+      shift
+      ;;
     --* )
       echo "ERROR: unknow option '$1'"
       usage
@@ -53,33 +61,6 @@ while [ $# -gt 0 ] ; do
   esac
 done
 
-
-
-
-get_voms_admin_lsc_info () {
-  vo="$1"
-  voms_server="$2"
-  result=$(curl --silent --connect-timeout 10 --location --fail --silent --show-error \
-                --capath /etc/grid-security/certificates/ \
-                --cert /etc/grid-security/hostcert.pem \
-                --key  /etc/grid-security/hostkey.pem \
-                "https://${voms_server}:8443/voms/${vo}/configuration/configuration.action" 2>&1
-          )
-  # Did curl return an error?
-  if grep --silent '^curl:' <<<"$result" ; then
-    # Just show the error.
-    echo "$result"
-    return 1
-  else
-    # Show the LSC info extracted from the page.
-    echo "$result" \
-    | grep -A 10 'LSC configuration' \
-    | grep -A2 '<textarea' \
-    | sed -e 's@<.*>@@g' \
-    | grep .
-    return 0
-  fi
-}
 
 
 for dir in $dirs ; do
@@ -101,20 +82,49 @@ for dir in $dirs ; do
     fi
     # Read LSC info from the VOMS server
     voms_server=$(sed -e 's@.*/@@' -e 's@.lsc@@' <<<"$lscfile")
-    lsc_live_info=$(get_voms_admin_lsc_info "$vo" "$voms_server")
-    # Empty? We couldn't read from the VOMS server. Report and skip.
-    if [ -z "$lsc_live_info" ] ; then
-      $errors && echo "$prefix❓$icon_question Could not read from https://${voms_server}:8443/voms/${vo}/configuration/configuration.action"
-      continue
+
+    # Get the configuration page from the VOMS server.
+    if $debug ; then
+      echo 1>&2 curl --silent --connect-timeout 10 --location --fail --silent --show-error \
+                --capath /etc/grid-security/certificates/ \
+                --cert /etc/grid-security/hostcert.pem \
+                --key  /etc/grid-security/hostkey.pem \
+                "https://${voms_server}:8443/voms/${vo}/configuration/configuration.action"
     fi
-    # A curl error, possibly 404. VO might be unknown to this VOMS server.
-    if grep --silent '^curl:' <<<"$lsc_live_info" ; then
+    result=$(curl --silent --connect-timeout 10 --location --fail --silent --show-error \
+                  --capath /etc/grid-security/certificates/ \
+                  --cert /etc/grid-security/hostcert.pem \
+                  --key  /etc/grid-security/hostkey.pem \
+                  "https://${voms_server}:8443/voms/${vo}/configuration/configuration.action" 2>&1
+            )
+    # Did curl return an error?
+    if grep --silent '^curl:' <<<"$result" ; then
       if $errors ; then
-        echo -n "$prefix $icon_question Error reading https://${voms_server}:8443/voms/${vo}/configuration/configuration.action - "
-        sed -e 's/curl: .* The requested URL returned error://' <<<"$lsc_live_info"
+        echo "$prefix $icon_question Could not read from" \
+             "https://${voms_server}:8443/voms/${vo}/configuration/configuration.action" \
+             " - $result"
       fi
       continue
     fi
+    # Get the hostname:portnumber for this VO.
+    voms_interface=$(echo "$result" \
+                     | grep -A10 VOMSES \
+                     | grep configurationInfo \
+                     | sed -e 's/<[^>]\+>//g' \
+                           -e 's/&quot;//g' \
+                     | awk '{print $2":"$3}' \
+                    )
+    lsc_live_info=$(openssl s_client -connect $voms_interface -nameopt=compat 2>&1 \
+                    | grep -e '^subject=' \
+                           -e '^issuer=' \
+                    | sed -e 's/^subject=//' \
+                          -e 's/^issuer=//'
+              )
+    if [ -z "$lsc_live_info" ] ; then
+      $errors && echo "$prefix $icon_question Could not get LSC info from VOMS server at $voms_interface."
+      continue
+    fi
+
     # We got info from the VOMS server. Let's compare!
     diff=$(diff <(echo -e "$lsc_file_info") <(echo -e "$lsc_live_info") )
     if [ -n "$diff" ] ; then
@@ -122,7 +132,7 @@ for dir in $dirs ; do
       {
         echo "== $lscfile =="
         echo "$lsc_file_info"
-        echo "== https://${voms_server}:8443/voms/${vo}/configuration/configuration.action =="
+        echo "== $voms_interface =="
         echo "$lsc_live_info"
       } | sed -e 's@^/@  /@' -e 's/^/  /'
     else
