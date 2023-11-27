@@ -63,6 +63,26 @@ done
 
 
 
+# VOMS servers need client certificate authentication.
+# If we are root, we can use the local host certificate as a client certificate.
+# If we are a normal user, we look for a X509 proxy or user cert.
+if [ "$EUID" -eq 0 ]; then
+  $debug && echo "You are root. Using local host certificate as client certificate."
+  curl_options="--cert /etc/grid-security/hostcert.pem --key /etc/grid-security/hostkey.pem"
+else
+  $debug && echo "You are a regular user. Using X509 VOMS proxy as client certificate."
+  if voms-proxy-info -exists -valid 0:10 ; then
+    $debug && echo "VOMS proxy is still valid."
+    curl_options="--cert $X509_USER_PROXY --cacert $X509_USER_PROXY"  
+  else
+    echo "$icon_redcross VOMS proxy has (almost) expired or is not present."
+    voms-proxy-info -all
+    exit 1
+  fi
+fi
+
+
+
 for dir in $dirs ; do
   $verbose && echo
   vo=$(basename "$dir")
@@ -87,14 +107,12 @@ for dir in $dirs ; do
     if $debug ; then
       echo 1>&2 curl --silent --connect-timeout 10 --location --fail --silent --show-error \
                 --capath /etc/grid-security/certificates/ \
-                --cert /etc/grid-security/hostcert.pem \
-                --key  /etc/grid-security/hostkey.pem \
+                $curl_options \
                 "https://${voms_server}:8443/voms/${vo}/configuration/configuration.action"
     fi
     result=$(curl --silent --connect-timeout 10 --location --fail --silent --show-error \
                   --capath /etc/grid-security/certificates/ \
-                  --cert /etc/grid-security/hostcert.pem \
-                  --key  /etc/grid-security/hostkey.pem \
+                  $curl_options \
                   "https://${voms_server}:8443/voms/${vo}/configuration/configuration.action" 2>&1
             )
     # Did curl return an error?
