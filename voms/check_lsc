@@ -114,12 +114,28 @@ for dir in $dirs ; do
                            -e 's/&quot;//g' \
                      | awk '{print $2":"$3}' \
                     )
+    if $debug ; then
+      echo "openssl s_client -connect $voms_interface -nameopt=compat"
+    fi
     lsc_live_info=$(openssl s_client -connect $voms_interface -nameopt=compat 2>&1 \
                     | grep -e '^subject=' \
                            -e '^issuer=' \
                     | sed -e 's/^subject=//' \
                           -e 's/^issuer=//'
-              )
+                   )
+    # Older versions of openssl don't support -nameopt=compat and they choke on it.
+    # So, we just try again without the option.
+    if [ -z "$lsc_live_info" ] ; then
+      if $debug ; then
+        echo "openssl s_client -connect $voms_interface"
+      fi
+      lsc_live_info=$(openssl s_client -connect $voms_interface 2>&1 \
+                      | grep -e '^subject=' \
+                             -e '^issuer=' \
+                      | sed -e 's/^subject=//' \
+                            -e 's/^issuer=//'
+                     )
+    fi
     if [ -z "$lsc_live_info" ] ; then
       $errors && echo "$prefix $icon_question Could not get LSC info from VOMS server at $voms_interface."
       continue
