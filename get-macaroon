@@ -49,8 +49,9 @@ usage() {
 	                           DELETE   - Delete a file or directory
 	                           MANAGE   - Rename or move a file or directory
 	                           LIST     - List objects in a directory
+	                           STAGE    - Stage (restore) a file from tape
 	                           READ_METADATA   - Read file status
-	                           UPDATE_METADATA - Stage a file, change QoS
+	                           UPDATE_METADATA - Change properties, change QoS
 	  --duration             - Duration that the link will be valid, in ISO8601 format
 	                           See https://en.wikipedia.org/wiki/ISO_8601#Durations
 	                           The duration may be limited by the server.
