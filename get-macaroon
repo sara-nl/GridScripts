@@ -352,7 +352,8 @@ if $debug ; then
             "$authn " \
             "-X POST -H 'Content-Type: application/macaroon-request' " \
             "-d \'$json_request\' " \
-            "$server "
+            "$server " \
+            "--dump-header >(grep '^HTTP/1.1' | grep -v '200' >&2)"
 fi
 
 
@@ -360,9 +361,13 @@ result=$(curl --silent \
               $authn \
               -X POST -H 'Content-Type: application/macaroon-request' \
               -d "$json_request" \
-              $server )
+              $server \
+              --dump-header >(grep '^HTTP/1.1' | grep -v '200' >&2)
+        )
+
 
 if ! echo "$result" | grep --silent "targetWithMacaroon" ; then
+  # No macaroon was returned. Print possible error messages to stderr.
   {
     echo "ERROR: could not get share link from $server."
     # Show output from server in the nicest way possible
