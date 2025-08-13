@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-debug=false
-
 # view-token
 #
 # This script can decode and show macaroons and OIDC (JWT) tokens.
@@ -15,58 +13,21 @@ usage() {
 	<filename>     - file containing a token. Can be a plain text file with the bare token,
 	                 or an Rclone config file. In that case, view-token will search for
 	                 a line containing "bearer_token" and decode the value.
+	                 You can use a trick like this:
+	                     view-token <(cat <<<"\$my_token")
+	                 This allows you to read from a variable without exposing the variable
+	                 to other users with the ps command.
 
 	<no filename>  - view-token will look for environment variable BEARER_TOKEN
 	                 and decode its value.
 
-	--debug        - Show additional information.
+	--minimal      - Show only minimal information.
+
+	--help         - Show this help text.
 
 	EOF
 }
 
-
-
-view_token() {
-  local token="$1"
-  local token_debug_info="$2"
-
-  echo "$token_debug_info"
-
-  # Determine token type (JWT or Macaroon)
-  if [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
-    # JWT / OIDC token.
-
-    # Get payload with the token properties.
-    payload=$(echo "$token" | cut -d "." -f2 | base64 -d 2>/dev/null | tr -d '\n')
-
-    # Check if decoding succeeded
-    if [ -z "$payload" ]; then
-      echo "Invalid token: cannot decode payload"
-      return 1
-    fi
-
-    # Print JWT/OIDC token with human readable timestamps
-    echo "Token is an OIDC token."
-    echo "$payload" | jq '. | .exp |= todate | .nbf |= todate | .iat |= todate'
-  else
-    # Not an OIDC token; probably a Macaroon
-    # We use grep with --text to avoid a "Binary file" message.
-    macaroon_decoded=$(echo "$token" \
-                       | base64 -d 2>/dev/null \
-                       | awk '{print substr($0, 5)}' 2>/dev/null \
-                       | grep --text -v 'signature' \
-                       | tr -d '\0')
-
-    # Check if decoding succeeded
-    if [ -z "$macaroon_decoded" ]; then
-      echo "Invalid macaroon: cannot decode"
-      return 1
-    fi
-
-    echo "Token is a macaroon."
-    echo -e "\033[34m\n$macaroon_decoded\n\033[0m" | sed -e 's/^/  /'
-  fi
-}
 
 
 validate_expiration_timestamp () {
@@ -127,7 +88,7 @@ check_token() {
     fi
 
     # If we get here, it means we have a valid OIDC token.
-    "JWT / OIDC token is still valid"
+    $verbose && echo "JWT / OIDC token is still valid"
     return 0
 
   else
@@ -146,7 +107,11 @@ check_token() {
     fi
 
     # Show the macaroon
-    echo -e "\033[34m\n$macaroon_decoded\n\033[0m" | sed -e 's/^/  /'
+    if $verbose ; then
+      echo -e "\033[34m\n$macaroon_decoded\n\033[0m" | sed -e 's/^/  /'
+    else
+      echo -e "\033[34m$macaroon_decoded\033[0m" | sed -e 's/^/  /'
+    fi
 
     # Extract expiration time (before) using regex
     exp=$(echo "$macaroon_decoded" | grep -o 'before:[0-9T:\.-]*Z' | sed -e 's/before://')
@@ -175,24 +140,45 @@ check_token() {
     fi
 
     # If we get here, it means we have a valid macaroon.
-    echo "Macaroon is still valid"
+    $verbose && echo "Macaroon is still valid"
     return 0
   fi
 }
 
 
-if [ -n "$1" ] ; then
-  tokenfile="$1"
-  echo "Token source: $tokenfile"
+# Read command line arguments.
+tokenfile=''
+verbose=true
+while [ $# -gt 0 ] ; do
+  # Argument can either be '--minimal' or a file name.
+  case "$1" in
+    --minimal )
+      verbose=false
+      shift
+      ;;
+    --help )
+      usage
+      exit 1
+      ;;
+    * )
+      tokenfile="$1"
+      shift
+      ;;
+  esac
+done
+
+
+if [ -n "$tokenfile" ] ; then
+  $verbose && echo "Token source: $tokenfile"
   #
-  # Let's check the file with the token.
-  if ! [ -f "$tokenfile" ] ; then
-    echo 1>&2 "ERROR: specified tokenfile '$tokenfile' does not exist."
+  # Read the tokenfile only once (It might be a file descriptor that will be closed after reading)
+  tokenfile_contents=$(<"$tokenfile") || {
+    echo "ERROR: unable to read token from '$tokenfile'" 1>&2
     exit 1
-  fi
+  }
   #
   # First, we assume the tokenfile is an Rclone config file.
-  token=$(sed -n 's/^bearer_token *= *//p' "$tokenfile")
+  token=$(sed -n 's/^bearer_token *= *//p' <<<"$tokenfile_contents")
   if [ "$(wc -l <<<"$token")" -gt 1 ] ; then
     echo 1>&2 "ERROR: file '$tokenfile' contains multiple tokens. Can't determine which one to show."
     exit 1
@@ -200,10 +186,11 @@ if [ -n "$1" ] ; then
   # If it was not an rclone config file, it may be a
   # plain text file with only the token.
   if [ -z "$token" ] ; then
-    token=$(head -n 1 "$tokenfile")
+    token=$(head -n 1 <<<"$tokenfile_contents")
   fi
 
 else
+  # No tokenfile specified. Let's try BEARER_TOKEN.
   if [ -n "$BEARER_TOKEN" ] ; then
     token="$BEARER_TOKEN"
     echo "Token source: BEARER_TOKEN variable"
@@ -214,5 +201,4 @@ else
   # read BEARER_TOKEN
 fi
 
-#view_token  "$token" || exit 1
 check_token "$token" || exit 1
