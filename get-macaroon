@@ -353,15 +353,20 @@ if $debug ; then
             "-X POST -H 'Content-Type: application/macaroon-request' " \
             "-d \'$json_request\' " \
             "$server " \
+            "--fail --show-error " \
             "--dump-header >(grep '^HTTP/1.1' | grep -v '200' >&2)"
 fi
 
-
+# This is where we actually obtain the macaroon from the dCache WebDAV door.
+# We use --fail, --show-error and --dump-header to show clear error messages.
+# --fail --show-error will show connection errors ("Could not resolve host")
+# --dump-header will show the HTTP code and its description ("HTTP/1.1 401 login failed").
 result=$(curl --silent \
               $authn \
               -X POST -H 'Content-Type: application/macaroon-request' \
               -d "$json_request" \
               $server \
+              --fail --show-error \
               --dump-header >(grep '^HTTP/1.1' | grep -v '200' >&2)
         )
 
