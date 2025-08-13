@@ -247,7 +247,7 @@ case $auth_method in
     if [ -x "$(command -v voms-proxy-info)" ]; then
       voms-proxy-info --exists 1>&2 || exit 1
     fi
-    authn="--capath /etc/grid-security/certificates/ --cert '$X509_USER_PROXY' --cacert '$X509_USER_PROXY'"
+    authn="--capath /etc/grid-security/certificates/ --cert $X509_USER_PROXY --cacert $X509_USER_PROXY"
     ;;
   user )
     authn="-u $user"
