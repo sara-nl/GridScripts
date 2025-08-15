@@ -56,12 +56,22 @@ usage() {
 	                           See https://en.wikipedia.org/wiki/ISO_8601#Durations
 	                           The duration may be limited by the server.
 	  --ip <subnet-list>     - Allow access from these addresses/subnets.
+	                           This may protect your macaroon from abuse.
 	                           Multiple subnets may be specified, comma separated.
 	                           Don't forget IPv6.
 	                           The person whom the macaroon is for, can find the
-	                           external addresses of his/her system with this command:
-	                           curl -4 icanhazip.com ; curl -6 icanhazip.com
+	                           external addresses of his/her system with
+	                           these commands:
+	                               curl -4 https://ifconfig.co
+	                               curl -6 https://ifconfig.co
 	                           or by browsing to https://whatismyipaddress.com/.
+	                           On SURF systems, get-macaroon is pre-configured
+	                           with the subnets of many SURF services. You may not
+	                           need to use the --ip option.
+	                           '--ip auto' will use the xternal IP address(es)
+	                           of your local system. The macaroon will only be valid
+	                           on your own system, not on any other. This may
+	                           prevent abuse.
 	  --max-file-size        - Set a maximum file size for uploads. dCache 5 required.
 	  --output link          - Print a link that anyone can open in a browser.
 	                           If you open the link in your browser, please do it in 
@@ -112,6 +122,30 @@ for configfile in /etc/get-macaroon.conf ~/.get-macaroon.conf ; do
     source "$configfile"
   fi
 done
+
+
+#
+# Some functions
+#
+get_my_ip () {
+  # Collect external addresses from the local system.
+  # We need *external* addresses because those are the ones dCache
+  # will see and validate. Local, private addresses
+  # (like 192.168.0.2) are useless.
+  # We try several providers (just in case one is down).
+  { curl --silent -6 https://ifconfig.co \
+    || curl --silent -6 https://api64.ipify.org \
+    || curl --silent -6 https://v6.ident.me; \
+    curl --silent -4 https://ifconfig.co \
+    || curl --silent -4 https://api.ipify.org \
+    || curl --silent -4 https://checkip.amazonaws.com;
+  } \
+  | grep --invert-match '^$' \
+  | paste -s -d , -
+}
+#
+# End of functions
+#
 
 
 while [ $# -gt 0 ] ; do
@@ -325,7 +359,17 @@ esac
 #
 
 if [ -n "$ip" ] ; then
-  ip_caveat=", \"ip:$ip\""
+  if [ "$ip" == 'auto' ] ; then
+    # Collect external addresses from the local system.
+    ips=$(get_my_ip)
+    if [ -z "$ips" ] ; then
+      echo 1>&2 "ERROR: could not obtain external IP address of the local system."
+      exit 1
+    fi
+    ip_caveat=", \"ip:$ips\""
+  else
+    ip_caveat=", \"ip:$ip\""
+  fi
 else
   ip_caveat=
 fi
