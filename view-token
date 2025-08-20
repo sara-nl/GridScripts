@@ -109,74 +109,117 @@ validate_ip_caveat () {
     return 1
   fi
 
-  # No match until we find one
-  match_ipv4=false
-  match_ipv6=false
   # Temporarily set Internal Field Separator to comma to split the IP caveat
   # (This does not affect awk)
   OLDIFS="$IFS"
   IFS=','
-  # Iterate over the values
-  for ip_caveat_item in $ip_caveat; do
-    # Check whether the networks of the IP caveat and the local address match.
-    # We take the subnet of the caveat and apply it to the local address.
-    # If ipcalc returns the same network for the IP caveat item and the the address
-    # of this system, it means there's a match.
-    # ipcalc on MacOS (darwin) is different from ipcalc in Linux, hence the OSTYPE check.
-    case $OSTYPE in
-      darwin* )
-        subnet=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
-        caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
-        # my_ipv4 or my_ipv6 may not be set. In that case ipcalc throws an error. We ignore that.
-        my_ipv4_network=$(ipcalc --nobinary "$my_ipv4/$subnet" 2>/dev/null | awk '/Prefix|Network/{print $2}')
-        my_ipv6_network=$(ipcalc --nobinary "$my_ipv6/$subnet" 2>/dev/null | awk '/Prefix|Network/{print $2}')
-        ;;
-      * )
-        subnet=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
-        caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
-        my_ipv4_network=$(ipcalc --network "$my_ipv4/$subnet" 2>/dev/null | sed -e 's/NETWORK=//')
-        my_ipv6_network=$(ipcalc --network "$my_ipv6/$subnet" 2>/dev/null | sed -e 's/NETWORK=//')
-        ;;
-    esac
-    #$debug && echo "Caveat network = $caveat_network --- IPv4 network = $my_ipv4_network --- IPv6 network = $my_ipv6_network"
-    case $caveat_network in
-      "$my_ipv4_network" )
-        echo "IPv4 address $my_ipv4 matches caveat subnet $ip_caveat_item."
+
+  # Does the local system have an IPv4 address? Then check if it matches the macaroon.
+  if [ -n "$my_ipv4" ] ; then 
+    # No match until we find one
+    match_ipv4=false
+    # Iterate over the values
+    for ip_caveat_item in $ip_caveat; do
+      # Check whether the networks of the IP caveat and the local address match.
+      # We take the subnet of the caveat and apply it to the local address.
+      # If ipcalc returns the same network for the IP caveat item and the the address
+      # of this system, it means there's a match.
+      # ipcalc on MacOS (darwin) is different from ipcalc in Linux, hence the OSTYPE check.
+      case $OSTYPE in
+        darwin* )
+          subnet=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
+          caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
+          my_ipv4_network=$(ipcalc --nobinary "$my_ipv4/$subnet" | awk '/Prefix|Network/{print $2}')
+          ;;
+        * )
+          subnet=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
+          caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
+          my_ipv4_network=$(ipcalc --network "$my_ipv4/$subnet" | sed -e 's/NETWORK=//')
+          ;;
+      esac
+      if [[ "$caveat_network" == "$my_ipv4_network" ]] ; then
+        #echo "IPv4 address $my_ipv4 matches caveat subnet $ip_caveat_item."
         match_ipv4=true
-        ;;
-      "$my_ipv6_network" )
-        echo "IPv6 address $my_ipv6 matches caveat subnet $ip_caveat_item."
+      fi
+    done
+  fi   # End if -n my_ipv4
+
+  # Does the local system have an IPv6 address? Then check if it matches the macaroon.
+  if [ -n "$my_ipv6" ] ; then 
+    # No match until we find one
+    match_ipv6=false
+    # Iterate over the values
+    for ip_caveat_item in $ip_caveat; do
+      # Check whether the networks of the IP caveat and the local address match.
+      # We take the subnet of the caveat and apply it to the local address.
+      # If ipcalc returns the same network for the IP caveat item and the the address
+      # of this system, it means there's a match.
+      # ipcalc on MacOS (darwin) is different from ipcalc in Linux, hence the OSTYPE check.
+      case $OSTYPE in
+        darwin* )
+          subnet=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
+          caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
+          my_ipv6_network=$(ipcalc --nobinary "$my_ipv6/$subnet" | awk '/Prefix|Network/{print $2}')
+          ;;
+        * )
+          subnet=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
+          caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
+          my_ipv6_network=$(ipcalc --network "$my_ipv6/$subnet" | sed -e 's/NETWORK=//')
+          ;;
+      esac
+      if [[ "$caveat_network" == "$my_ipv6_network" ]] ; then
+        #echo "IPv6 address $my_ipv6 matches caveat subnet $ip_caveat_item."
         match_ipv6=true
-        ;;
-      '' )
-        echo 1>&2 "Could not get network from '$ip_caveat_item'"
-        return 1
-        ;;
-      * )
-        # No match. Perhaps the next item will match?
-        ;;
-    esac
-  done
+      fi
+    done
+  fi   # End if -n my_ipv6
 
   # Reset IFS to default (space, tab, newline)
   IFS="$OLDIFS"
 
   # Let's see what we got. Does IPv4 match? Does IPv6 match?
-  if $match_ipv4 ; then
-    if $match_ipv6 ; then
-      echo "Both your IPv4 ($my_ipv4) and IPv6 ($my_ipv6) match. This macaroon is valid from this system!"
-      return 0
+  if [ -n "$my_ipv4" ] ; then
+    if $match_ipv4 ; then
+      if [ -n "$my_ipv6" ] ; then
+        if $match_ipv6 ; then
+          echo "Both your IPv4 ($my_ipv4) and IPv6 ($my_ipv6) match. This macaroon is valid from this system."
+          return 0
+        else
+          echo "Your IPv4 ($my_ipv4) matches, but your IPv6 ($my_ipv6) doesn't. Not sure if this macaroon will work on this system."
+          return 1
+        fi
+      else
+        # There is no IPv6 on this system
+        echo "Your IPv4 ($my_ipv4) matches. This macaroon is valid from this system."
+        return 0
+      fi
     else
-      echo "Your IPv4 ($my_ipv4) matches, but your IPv6 ($my_ipv6) doesn't. Not sure if this macaroon will work on this system."
+      # IPv4 doesn't match
+      if [ -n "$my_ipv6" ] ; then
+        if $match_ipv6 ; then
+          echo "Your IPv6 ($my_ipv6) matches, but your IPv4 ($my_ipv4) doesn't. Not sure if this macaroon will work on this system."
+        else
+          echo "Neither your IPv4 ($my_ipv4) nor your IPv6 ($my_ipv6) address matches the IP caveat. This macaroon will not work on this system."
+        fi
+      else
+        echo "Your IPv4 ($my_ipv4) does not match. This macaroon will not work on this system."
+      fi
       return 1
     fi
   else
-    if $match_ipv6 ; then
-      echo "Your IPv6 ($my_ipv6) matches, but your IPv4 ($my_ipv4) doesn't. Not sure if this macaroon will work on this system."
+    # No IPv4 on this system.
+    if [ -n "$my_ipv6" ] ; then
+      if $match_ipv6 ; then
+        echo "Your IPv6 ($my_ipv6) matches. This macaroon is valid on this system."
+        return 0
+      else
+        echo "Your IPv6 ($my_ipv6) does not match. This macaroon will not work on this system."
+        return 1
+      fi
     else
-      echo "Neither your IPv4 ($my_ipv4) nor your IPv6 ($my_ipv6) address matches the IP caveat. This macaroon will not work on this system."
+      echo "No IP addresses found on this system. Could not validate IP caveat of macaroon."
+      return 1
     fi
-    return 1
   fi
 }
 
