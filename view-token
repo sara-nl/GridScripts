@@ -127,22 +127,25 @@ validate_ip_caveat () {
       darwin* )
         subnet=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
         caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
-        my_ipv4_network=$(ipcalc --nobinary "$my_ipv4/$subnet" | awk '/Prefix|Network/{print $2}')
-        my_ipv6_network=$(ipcalc --nobinary "$my_ipv6/$subnet" | awk '/Prefix|Network/{print $2}')
+        # my_ipv4 or my_ipv6 may not be set. In that case ipcalc throws an error. We ignore that.
+        my_ipv4_network=$(ipcalc --nobinary "$my_ipv4/$subnet" 2>/dev/null | awk '/Prefix|Network/{print $2}')
+        my_ipv6_network=$(ipcalc --nobinary "$my_ipv6/$subnet" 2>/dev/null | awk '/Prefix|Network/{print $2}')
         ;;
       * )
-        subnet=$(ipcalc --netmask  "$ip_caveat_item")
-        caveat_network=$(ipcalc --network "$ip_caveat_item")
-        my_ipv4_network=$(ipcalc --network "$my_ipv4/$subnet")
-        my_ipv6_network=$(ipcalc --network "$my_ipv6/$subnet")
+        subnet=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
+        caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
+        my_ipv4_network=$(ipcalc --network "$my_ipv4/$subnet" 2>/dev/null | sed -e 's/NETWORK=//')
+        my_ipv6_network=$(ipcalc --network "$my_ipv6/$subnet" 2>/dev/null | sed -e 's/NETWORK=//')
         ;;
     esac
-    #$debug && echo "$caveat_network --- $my_ipv4_network --- $my_ipv6_network"
+    #$debug && echo "Caveat network = $caveat_network --- IPv4 network = $my_ipv4_network --- IPv6 network = $my_ipv6_network"
     case $caveat_network in
       "$my_ipv4_network" )
+        echo "IPv4 address $my_ipv4 matches caveat subnet $ip_caveat_item."
         match_ipv4=true
         ;;
       "$my_ipv6_network" )
+        echo "IPv6 address $my_ipv6 matches caveat subnet $ip_caveat_item."
         match_ipv6=true
         ;;
       '' )
