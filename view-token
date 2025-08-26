@@ -127,14 +127,18 @@ validate_ip_caveat () {
       # ipcalc on MacOS (darwin) is different from ipcalc in Linux, hence the OSTYPE check.
       case $OSTYPE in
         darwin* )
-          subnet=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
+          prefix=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
           caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
-          my_ipv4_network=$(ipcalc --nobinary "$my_ipv4/$subnet" | awk '/Prefix|Network/{print $2}')
+          my_ipv4_network=$(ipcalc --nobinary "$my_ipv4/$prefix" | awk '/Prefix|Network/{print $2}')
           ;;
         * )
-          subnet=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
+          prefix=$(ipcalc --prefix "$ip_caveat_item" | sed -e 's/PREFIX=//')
+          if [ "$prefix" -gt 32 ] ; then
+            # This prefix must be IPv6 but here we're checking an IPv4 address. Skipping.
+            continue
+          fi
           caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
-          my_ipv4_network=$(ipcalc --network "$my_ipv4/$subnet" | sed -e 's/NETWORK=//')
+          my_ipv4_network=$(ipcalc --network --silent "$my_ipv4/$prefix" | sed -e 's/NETWORK=//')
           ;;
       esac
       if [[ "$caveat_network" == "$my_ipv4_network" ]] ; then
@@ -157,14 +161,14 @@ validate_ip_caveat () {
       # ipcalc on MacOS (darwin) is different from ipcalc in Linux, hence the OSTYPE check.
       case $OSTYPE in
         darwin* )
-          subnet=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
+          netmask=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
           caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
-          my_ipv6_network=$(ipcalc --nobinary "$my_ipv6/$subnet" | awk '/Prefix|Network/{print $2}')
+          my_ipv6_network=$(ipcalc --nobinary "$my_ipv6/$netmask" | awk '/Prefix|Network/{print $2}')
           ;;
         * )
-          subnet=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
+          netmask=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
           caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
-          my_ipv6_network=$(ipcalc --network "$my_ipv6/$subnet" | sed -e 's/NETWORK=//')
+          my_ipv6_network=$(ipcalc --network "$my_ipv6/$netmask" | sed -e 's/NETWORK=//')
           ;;
       esac
       if [[ "$caveat_network" == "$my_ipv6_network" ]] ; then
@@ -257,11 +261,13 @@ check_token() {
   else
     # Macaroon Token (assume it's base64 encoded)
     # We use grep with --text to avoid a "Binary file" message.
+    # We use tr -d '\0' to strip off NUL characters,
+    # and 2>/dev/null to hide an error message on MacOS.
     macaroon_decoded=$(echo "$token" \
                        | base64 -d 2>/dev/null \
                        | awk '{print substr($0, 5)}' 2>/dev/null \
                        | grep --text -v 'signature' \
-                       | tr -d '\0')
+                       | tr -d '\0' 2>/dev/null )
 
     # Check if decoding succeeded
     if [ -z "$macaroon_decoded" ]; then
