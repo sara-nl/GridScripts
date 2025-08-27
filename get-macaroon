@@ -58,7 +58,8 @@ usage() {
 	  --ip <subnet-list>     - Allow access from these addresses/subnets.
 	                           This may protect your macaroon from abuse.
 	                           Multiple subnets may be specified, comma separated.
-	                           Don't forget IPv6.
+	                           A system may have both an IPv4 and an IPv6 address.
+	                           In that case, add them both to this list.
 	                           The person whom the macaroon is for, can find the
 	                           external addresses of his/her system with
 	                           these commands:
