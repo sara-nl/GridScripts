@@ -193,9 +193,9 @@ else
   # No tokenfile specified. Let's try BEARER_TOKEN.
   if [ -n "$BEARER_TOKEN" ] ; then
     token="$BEARER_TOKEN"
-    echo "Token source: BEARER_TOKEN variable"
+    $verbose && echo "Token source: BEARER_TOKEN variable"
   else
-    echo "No tokenfile specified, and BEARER_TOKEN is empty. Nothing to do."
+    echo 1>&2 "No tokenfile specified, and BEARER_TOKEN is empty. Nothing to do."
     exit 1
   fi
   # read BEARER_TOKEN
