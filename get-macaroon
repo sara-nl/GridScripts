@@ -10,8 +10,8 @@
 # Old versions available at:
 # https://github.com/onnozweers/dcache-scripts/blob/master/get-share-link
 #
-# Uses a script called view-macaroon, which is available here:
-# https://github.com/sara-nl/GridScripts/blob/master/view-macaroon
+# Uses a script called view-token, which is available here:
+# https://github.com/sara-nl/GridScripts/blob/master/view-token
 #
 # Changes:
 # 2018-06-22 - Onno - Initial version
