@@ -129,7 +129,7 @@ done
 # Some functions
 #
 get_my_ip () {
-  # Collect external addresses from the local system.
+  # Collect external addresses of the local system.
   # We need *external* addresses because those are the ones dCache
   # will see and validate. Local, private addresses
   # (like 192.168.0.2) are useless.
