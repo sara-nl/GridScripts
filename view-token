@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+
+# view-token
+#
+# This script can decode and show macaroons and OIDC (JWT) tokens.
+
+usage() {
+  cat <<-EOF
+	view-token - a script to view the properties of macaroons and OIDC tokens.
+
+	Arguments:
+
+	<filename>     - file containing a token. Can be a plain text file with the bare token,
+	                 or an Rclone config file. In that case, view-token will search for
+	                 a line containing "bearer_token" and decode the value.
+	                 You can use a trick like this:
+	                     view-token <(cat <<<"\$my_token")
+	                 This allows you to read from a variable without exposing the variable
+	                 to other users with the ps command.
+
+	<no filename>  - view-token will look for environment variable BEARER_TOKEN
+	                 and decode its value.
+
+	--minimal      - Show only minimal information.
+
+	--help         - Show this help text.
+
+	EOF
+}
+
+
+
+validate_expiration_timestamp () {
+  local exp_unix="$1"           # Expiration timestamp (unix format)
+  local min_valid_time=60       # Token should be valid for more than this many seconds
+
+  # Do we actually have an expiration timestamp?
+  if [ -z "$exp_unix" ] || ! [[ "$exp_unix" =~ ^[0-9]+$ ]]; then
+    echo 1>&2 "ERROR: Invalid token: missing or invalid expiration field"
+    return 1
+  fi
+
+  # Get the current time in seconds since epoch
+  now=$(date +%s)
+
+  # Check if the token is expired
+  if [ "$now" -ge "$exp_unix" ]; then
+    echo 1>&2 "Token has expired $(( now - exp_unix )) seconds ago."
+    return 1
+  fi
+
+  # Check if the token is about to expire
+  if [ "$now" -ge "$(( exp_unix - min_valid_time ))" ]; then
+    echo 1>&2 "Warning: Token will expire in $(( exp_unix - now )) seconds."
+    return 1
+  fi
+
+  # If we get here, the expiration timestamp should be valid.
+  return 0
+}
+
+
+check_token() {
+  local token="$1"
+  local token_debug_info="$2"
+
+  # Determine token type (JWT or Macaroon)
+  if [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+    # JWT / OIDC token
+    payload=$(echo "$token" | cut -d "." -f2 | base64 -d 2>/dev/null | tr -d '\n')
+
+    # Check if decoding succeeded
+    if [ -z "$payload" ]; then
+      echo 1>&2 "ERROR: Invalid token: cannot decode payload"
+      return 1
+    fi
+
+    # Show JWT / OIDC token
+    echo "$payload" | jq '. | .exp |= todate | .nbf |= todate | .iat |= todate'
+
+    # Extract expiration time (exp) from payload
+    exp_unix=$(echo "$payload" | jq -r '.exp' 2>/dev/null)
+
+    # Fail if the token has (almost) expired
+    if ! validate_expiration_timestamp "$exp_unix" "$token_debug_info" ; then
+      echo 1>&2 "JWT/OIDC token is no longer valid."
+      return 1
+    fi
+
+    # If we get here, it means we have a valid OIDC token.
+    $verbose && echo "JWT / OIDC token is still valid"
+    return 0
+
+  else
+    # Macaroon Token (assume it's base64 encoded)
+    # We use grep with --text to avoid a "Binary file" message.
+    macaroon_decoded=$(echo "$token" \
+                       | base64 -d 2>/dev/null \
+                       | awk '{print substr($0, 5)}' 2>/dev/null \
+                       | grep --text -v 'signature' \
+                       | tr -d '\0')
+
+    # Check if decoding succeeded
+    if [ -z "$macaroon_decoded" ]; then
+      echo 1>&2 "ERROR: Invalid token: cannot decode"
+      return 1
+    fi
+
+    # Show the macaroon
+    if $verbose ; then
+      echo -e "\033[34m\n$macaroon_decoded\n\033[0m" | sed -e 's/^/  /'
+    else
+      echo -e "\033[34m$macaroon_decoded\033[0m" | sed -e 's/^/  /'
+    fi
+
+    # Extract expiration time (before) using regex
+    exp=$(echo "$macaroon_decoded" | grep -o 'before:[0-9T:\.-]*Z' | sed -e 's/before://')
+
+    # Validate expiration field
+    if [ -z "$exp" ]; then
+      echo 1>&2 "ERROR: invalid macaroon: missing 'before' field"
+      return 1
+    fi
+
+    # Convert expiration time to unix time (seconds since epoch)
+    case $OSTYPE in
+      darwin* )  exp_unix=$(date -u -j -f "%Y-%m-%dT%H:%M:%S" "${exp:0:19}" +"%s" 2>/dev/null)  ;;
+            * )  exp_unix=$(date -d "$exp" +%s 2>/dev/null)  ;;
+    esac
+
+    if [ -z "$exp_unix" ]; then
+      echo 1>&2 "ERROR: invalid macaroon: unable to parse 'before' timestamp"
+      return 1
+    fi
+
+    # Fail if the token has (almost) expired
+    if ! validate_expiration_timestamp "$exp_unix" "$token_debug_info" ; then
+      echo 1>&2 "Macaroon is no longer valid."
+      return 1
+    fi
+
+    # If we get here, it means we have a valid macaroon.
+    $verbose && echo "Macaroon is still valid"
+    return 0
+  fi
+}
+
+
+# Read command line arguments.
+tokenfile=''
+verbose=true
+while [ $# -gt 0 ] ; do
+  # Argument can either be '--minimal' or a file name.
+  case "$1" in
+    --minimal )
+      verbose=false
+      shift
+      ;;
+    --help )
+      usage
+      exit 1
+      ;;
+    * )
+      tokenfile="$1"
+      shift
+      ;;
+  esac
+done
+
+
+if [ -n "$tokenfile" ] ; then
+  $verbose && echo "Token source: $tokenfile"
+  #
+  # Read the tokenfile only once (It might be a file descriptor that will be closed after reading)
+  tokenfile_contents=$(<"$tokenfile") || {
+    echo "ERROR: unable to read token from '$tokenfile'" 1>&2
+    exit 1
+  }
+  #
+  # First, we assume the tokenfile is an Rclone config file.
+  token=$(sed -n 's/^bearer_token *= *//p' <<<"$tokenfile_contents")
+  if [ "$(wc -l <<<"$token")" -gt 1 ] ; then
+    echo 1>&2 "ERROR: file '$tokenfile' contains multiple tokens. Can't determine which one to show."
+    exit 1
+  fi
+  # If it was not an rclone config file, it may be a
+  # plain text file with only the token.
+  if [ -z "$token" ] ; then
+    token=$(head -n 1 <<<"$tokenfile_contents")
+  fi
+
+else
+  # No tokenfile specified. Let's try BEARER_TOKEN.
+  if [ -n "$BEARER_TOKEN" ] ; then
+    token="$BEARER_TOKEN"
+    $verbose && echo "Token source: BEARER_TOKEN variable"
+  else
+    echo 1>&2 "No tokenfile specified, and BEARER_TOKEN is empty. Nothing to do."
+    exit 1
+  fi
+  # read BEARER_TOKEN
+fi
+
+check_token "$token" || exit 1

@@ -29,4 +29,8 @@ Script to obtain a macaroon (bearer token) from a dCache WebDAV door. Macaroons 
 
 ## view-macaroon
 
-Script to deserialise a macaroon (to see its properties).
+(Deprecated; use view-token instead) Script to deserialise a macaroon (to see its properties).
+
+## view-token
+
+New version of view-macaroon. Decodes both macaroons and OIDC tokens, and does some validation.
