@@ -10,8 +10,8 @@
 # Old versions available at:
 # https://github.com/onnozweers/dcache-scripts/blob/master/get-share-link
 #
-# Uses a script called view-macaroon, which is available here:
-# https://github.com/sara-nl/GridScripts/blob/master/view-macaroon
+# Uses a script called view-token, which is available here:
+# https://github.com/sara-nl/GridScripts/blob/master/view-token
 #
 # Changes:
 # 2018-06-22 - Onno - Initial version
@@ -29,6 +29,11 @@
 # 2020-03-07 - Onno - Added --netrc option
 # 2020-03-09 - Onno - Check for view-macaroon in same dir as get-macaroon
 # 2020-03-31 - Juan Luis Font Calvo - Fix html2text call
+# 2025-08-13 - Onno - Show better error messages
+# 2025-08-13 - Onno - Fix token authentication
+# 2025-08-13 - Onno - Improve quoting and other things suggested by ShellCheck
+# 2025-08-13 - Onno - Use view-token instead of view-macaroon
+
 
 usage() {
   cat <<-EOF
@@ -37,10 +42,13 @@ usage() {
 	Options are:
 	  --url <url>
 	  --chroot               - Make specified path the root diectory, hiding upper dirs
-	  --proxy                - Use proxy specified in X509_USER_PROXY
+	  --proxy                - Use X509 proxy specified in X509_USER_PROXY
 	  --user <username>      - Username/password authentication
 	  --netrc [filename]     - Authenticate with a curl netrc file.
 	                           If no filename was provided, use ~/.netrc.
+	  --tokenfile <file>     - Read input authentication token from this file
+	                           If no authentication method is specified,
+	                           get-macaroon will try to use \$BEARER_TOKEN.
 	  --permissions <list>   - Comma separated list of allowed activities. Example:
 	                           DOWNLOAD,LIST
 	                           These permissions can be given:
@@ -52,17 +60,17 @@ usage() {
 	                           STAGE    - Stage (restore) a file from tape
 	                           READ_METADATA   - Read file status
 	                           UPDATE_METADATA - Change properties, change QoS
-	  --duration             - Duration that the link will be valid, in ISO8601 format
+	  --duration             - Duration that the link or macaroon will be valid, in ISO8601 format
 	                           See https://en.wikipedia.org/wiki/ISO_8601#Durations
 	                           The duration may be limited by the server.
-	  --ip <subnet-list>     - Allow access from these addresses/subnets.
+	  --ip <subnet-list>     - Allow access from these addresses/subnets only.
 	                           Multiple subnets may be specified, comma separated.
 	                           Don't forget IPv6.
 	                           The person whom the macaroon is for, can find the
 	                           external addresses of his/her system with this command:
 	                           curl -4 icanhazip.com ; curl -6 icanhazip.com
 	                           or by browsing to https://whatismyipaddress.com/.
-	  --max-file-size        - Set a maximum file size for uploads. dCache 5 required.
+	  --max-file-size        - Set a maximum file size for uploads.
 	  --output link          - Print a link that anyone can open in a browser.
 	                           If you open the link in your browser, please do it in 
 	                           a new private window, to be certain you're authenticated
@@ -118,7 +126,7 @@ while [ $# -gt 0 ] ; do
   case "$1" in
     --url )
       url="$2"
-      shift 2
+      shift ; shift
       ;;
     --chroot )
       path_or_root="root"
@@ -148,21 +156,27 @@ while [ $# -gt 0 ] ; do
       auth_method=proxy
       shift
       ;;
+    --tokenfile )
+      auth_method=token
+      tokenfile="$2"
+      token=$(<"$tokenfile")
+      shift ; shift
+      ;;
     --permissions )
       activity="$2"
-      shift 2
+      shift ; shift
       ;;
     --duration )
       duration="$2"
-      shift 2
+      shift ; shift
       ;;
     --ip )
       ip="$2"
-      shift 2
+      shift ; shift
       ;;
     --max-file-size )
       max_file_size="$2"
-      shift 2
+      shift ; shift
       ;;
     --output )
       output="$2"
@@ -197,22 +211,36 @@ if [ -z "$url" ] ; then
   usage
 fi
 
+
+if [ -z "$auth_method" ] ; then
+  # User did not specify authentication method. Let's try if BEARER_TOKEN is set and use that.
+  if [ -n "$BEARER_TOKEN" ] ; then
+    echo 1>&2 "Using \$BEARER_TOKEN for authentication."
+    token="$BEARER_TOKEN"
+    auth_method='token'
+  else
+    echo 1>&2 "ERROR: no authentication method was specified, and BEARER_TOKEN is not set."
+    exit 1
+  fi
+fi
+
+
 case $auth_method in
   netrc )
     if [ ! -f "$netrcfile" ] ; then
-      echo "ERROR: could not open netrc file '$netrcfile'."
+      echo 1>&2 "ERROR: could not open netrc file '$netrcfile'."
       exit 1
     fi
     authn="--netrc-file $netrcfile"
     ;;
   proxy )
     if [ ! -f "$X509_USER_PROXY" ] ; then
-      echo "ERROR: could not open proxy '$X509_USER_PROXY'."
+      echo 1>&2 "ERROR: could not open proxy '$X509_USER_PROXY'."
       exit 1
     fi
     if [ ! -d /etc/grid-security/certificates ] ; then
-      echo "ERROR: could not find /etc/grid-security/certificates/." \
-           "Please install the Grid root certificates if you want to use your proxy."
+      echo 1>&2 "ERROR: could not find /etc/grid-security/certificates/." \
+                "Please install the Grid root certificates if you want to use your proxy."
       exit 1
     fi
     # Check if the proxy is still valid; if not, exit after the error message.
@@ -226,7 +254,8 @@ case $auth_method in
     ;;
   token )
     # We can't specify the token as a command line argument,
-    # because others could read that with the ps command.
+    # because other users on the same system could read the token
+    # with the ps command and steal and abuse it.
     # So we have to put the authorization header in a temporary file.
     # The mktemp command differs on OSX.
     curl_authorization_header_file=$(mktemp authorization_header_XXXXXXXXXXXX)
@@ -249,13 +278,13 @@ case $auth_method in
     authn="--config $curl_authorization_header_file"
     ;;
   * )
-    echo "ERROR: you have to specify a valid authentication method."
+    echo 1>&2 "ERROR: you have to specify a valid authentication method."
     exit 1
     ;;
 esac
 
 
-server=$(echo "$url" | egrep -o 'https://[^/]+/')
+server=$(echo "$url" | grep -E -o 'https://[^/]+/')
 dir=$(echo "$url" | sed -e 's#https://[^/]*##')
 if [ -z "$dir" ] ; then
   dir=/
@@ -285,9 +314,10 @@ case $OSTYPE in
     ;;
 esac
 
+# Additional validation based on the output format
 case $output in
-  link|macaroon|curl )
-    # output format OK
+  link | macaroon | curl )
+    # No extra validation needed
     ;;
   file )
     if [ -z "$filename" ] ; then
@@ -349,20 +379,30 @@ if $debug ; then
   echo
   echo "Curl command:"
   echo "curl --silent " \
-            "$authn " \
+            "$authn" \
             "-X POST -H 'Content-Type: application/macaroon-request' " \
             "-d \'$json_request\' " \
-            "$server "
+            "'$server' " \
+            "--fail --show-error " \
+            "--dump-header >(grep '^HTTP/1.1' | grep -v '200' >&2)"
 fi
 
-
+# This is where we actually obtain the macaroon from the dCache WebDAV door.
+# We use --fail, --show-error and --dump-header to show clear error messages.
+# --fail --show-error will show connection errors ("Could not resolve host")
+# --dump-header will show the HTTP code and its description ("HTTP/1.1 401 login failed").
 result=$(curl --silent \
               $authn \
               -X POST -H 'Content-Type: application/macaroon-request' \
               -d "$json_request" \
-              $server )
+              "$server" \
+              --fail --show-error \
+              --dump-header >(grep '^HTTP/1.1' | grep -v '200' >&2)
+        )
+
 
 if ! echo "$result" | grep --silent "targetWithMacaroon" ; then
+  # No macaroon was returned. Print possible error messages to stderr.
   {
     echo "ERROR: could not get share link from $server."
     # Show output from server in the nicest way possible
@@ -385,29 +425,37 @@ macaroon=$(echo "$result" | jq -r '.macaroon')
 link=$(echo "$result" | jq -r '.uri.targetWithMacaroon')
 
 # Show contents of macaroon
-if [ -x "${script_dir}/view-macaroon" ] ; then
-  macaroon_viewer="${script_dir}/view-macaroon"
+if [ -x "${script_dir}/view-token" ] ; then
+  macaroon_viewer="${script_dir}/view-token"
 else
-  macaroon_viewer="$(command -v view-macaroon)"
+  macaroon_viewer="$(command -v view-token)"
 fi
-echo "Macaroon viewer: $macaroon_viewer"
 if [ -x "$macaroon_viewer" ] ; then
-  BLUE=$'\e[34m'
-  RESET=$'\e[39m'
-  echo -e "$BLUE"
-  echo "=== View deserialized macaroon ==="
-  $macaroon_viewer <<<"$macaroon"
-  echo "=== End deserialized macaroon ==="
-  echo -e "$RESET"
-  echo
+  echo 1>&2 "Macaroon viewer: $macaroon_viewer"
+  # The <(cat) construction is to prevent the macaroon to be visible with the 'ps' command.
+  macaroon_decoded=$($macaroon_viewer --minimal <(cat <<<"$macaroon") )
+  {
+    echo "=== View deserialized macaroon ==="
+    echo "$macaroon_decoded"
+    echo "=== End deserialized macaroon ==="
+    echo
+  } 1>&2
   #
-  # Log macaroon properties in a (private) file; strip signature to prevent theft
+  # Log macaroon properties in a (private) file
   {
     echo "=== $(date) ==="
-    $macaroon_viewer <<<"$macaroon" | grep -v signature
+    echo "$macaroon_decoded"
     echo -e "=====================================\n"
   } >> ~/macaroons.log
   chmod 600 ~/macaroons.log
+else
+  {
+    echo
+    echo "Warning: could not find command view-token." \
+         "Unable to show or log the macaroon properties."
+    echo "Install view-token (from the same repo as get-macaroon) to get rid of this message."
+    echo
+  } 1>&2
 fi
 
 
@@ -418,6 +466,8 @@ case $output in
     ;;
   macaroon )
     # Just the bare token, nothing else
+    # It's important that all other output is sent to stderr, so users can do this:
+    # export BEARER_TOKEN=$(get-macaroon ... --output macaroon)
     echo "$macaroon"
     ;;
   file )
@@ -454,7 +504,7 @@ case $output in
     echo "Creating rclone config file $remote_name.conf:"
     echo
     $debug && echo "rclone --config=$remote_name.conf config create $remote_name webdav url $server vendor other user '' password '' bearer_token $macaroon"
-    rclone --config=$remote_name.conf config create $remote_name webdav url $server vendor other user '' password '' bearer_token $macaroon
+    rclone --config="$remote_name.conf" config create "$remote_name" webdav url "$server" vendor other user '' password '' bearer_token "$macaroon"
     echo
     echo "Send this file to the persons you want to share data with."
     echo "They need rclone v1.42-012-gfa051ff9 or newer to access the data."
@@ -467,13 +517,13 @@ case $output in
     fi
     # Generate QR image
     echo "Creating QR image file: $png_filename"
-    if qrencode -o $png_filename "$link" ; then
+    if qrencode -o "$png_filename" "$link" ; then
       # If the name is "display[.png]", the user wants to see it now!
       if [ "$png_filename" = "display.png" ] ; then
         # Try to open it in an image viewer
         for imageviewer in feh display xdg-open eog Xming ; do
           if [ -x "$(command -v $imageviewer)" ] ; then
-            $imageviewer $png_filename
+            $imageviewer "$png_filename"
             break
           fi
         done
@@ -481,7 +531,7 @@ case $output in
         echo "Created QR image file: $png_filename"
       fi
     else
-      echo "ERROR: Could not create QR file."
+      echo 1>&2 "ERROR: Could not create QR file."
       exit 1
     fi
     ;;
