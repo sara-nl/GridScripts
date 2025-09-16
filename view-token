@@ -60,6 +60,174 @@ validate_expiration_timestamp () {
 }
 
 
+get_my_ip () {
+  case $1 in
+    4 )
+      curl --silent -4 https://ifconfig.co \
+      || curl --silent -4 https://api.ipify.org \
+      || curl --silent -4 https://checkip.amazonaws.com
+      ;;
+    6 )
+      curl --silent -6 https://ifconfig.co \
+      || curl --silent -6 https://api64.ipify.org \
+      || curl --silent -6 https://v6.ident.me
+      ;;
+    '' )
+      echo "ERROR: get_my_ip requires an IP version (4 or 6)."
+      exit 1
+      ;;
+    * )
+      echo "ERROR: requested IP version is '$1' but it should be 4 or 6."
+      exit 1
+      ;;
+  esac
+}
+
+
+validate_ip_caveat () {
+  # This function checks whether the IP address(es) of the local host
+  # match the macaroon's IP caveats.
+  #
+  # We need ipcalc for this. If it's not available, quit.
+  if [ ! -x "$(command -v ipcalc)" ]; then
+    echo 1>&2 "If you install ipcalc, I can check the IP caveat of your macaroon."
+    echo 1>&2 "You can install it with 'brew install ipcalc' (MacOS) or 'dnf install ipcalc' (RedHat and similar)"
+    return 1
+  fi
+  # The IP caveat from the macaroon
+  ip_caveat="$1"
+  if [ -z "$ip_caveat" ] ; then
+    echo 1>&2 "IP caveat is empty." \
+              "It is recommended to use IP caveats in a macaroon, to avoid theft and abuse."
+    return 1
+  fi
+  # Get the external addreses of the local system.
+  my_ipv4=$(get_my_ip 4)
+  my_ipv6=$(get_my_ip 6)
+  if [[ -z "$my_ipv4" && -z "$my_ipv6" ]]; then
+    echo "Couldn't find IP addresses on this system; can't check the IP caveat."
+    return 1
+  fi
+
+  # Temporarily set Internal Field Separator to comma to split the IP caveat
+  # (This does not affect awk)
+  OLDIFS="$IFS"
+  IFS=','
+
+  # Does the local system have an IPv4 address? Then check if it matches the macaroon.
+  if [ -n "$my_ipv4" ] ; then 
+    # No match until we find one
+    match_ipv4=false
+    # Iterate over the values
+    for ip_caveat_item in $ip_caveat; do
+      # Check whether the networks of the IP caveat and the local address match.
+      # We take the subnet of the caveat and apply it to the local address.
+      # If ipcalc returns the same network for the IP caveat item and the the address
+      # of this system, it means there's a match.
+      # ipcalc on MacOS (darwin) is different from ipcalc in Linux, hence the OSTYPE check.
+      case $OSTYPE in
+        darwin* )
+          prefix=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
+          caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
+          my_ipv4_network=$(ipcalc --nobinary "$my_ipv4/$prefix" | awk '/Prefix|Network/{print $2}')
+          ;;
+        * )
+          prefix=$(ipcalc --prefix "$ip_caveat_item" | sed -e 's/PREFIX=//')
+          if [ "$prefix" -gt 32 ] ; then
+            # This prefix must be IPv6 but here we're checking an IPv4 address. Skipping.
+            continue
+          fi
+          caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
+          my_ipv4_network=$(ipcalc --network --silent "$my_ipv4/$prefix" | sed -e 's/NETWORK=//')
+          ;;
+      esac
+      if [[ "$caveat_network" == "$my_ipv4_network" ]] ; then
+        #echo "IPv4 address $my_ipv4 matches caveat subnet $ip_caveat_item."
+        match_ipv4=true
+      fi
+    done
+  fi   # End if -n my_ipv4
+
+  # Does the local system have an IPv6 address? Then check if it matches the macaroon.
+  if [ -n "$my_ipv6" ] ; then 
+    # No match until we find one
+    match_ipv6=false
+    # Iterate over the values
+    for ip_caveat_item in $ip_caveat; do
+      # Check whether the networks of the IP caveat and the local address match.
+      # We take the subnet of the caveat and apply it to the local address.
+      # If ipcalc returns the same network for the IP caveat item and the the address
+      # of this system, it means there's a match.
+      # ipcalc on MacOS (darwin) is different from ipcalc in Linux, hence the OSTYPE check.
+      case $OSTYPE in
+        darwin* )
+          netmask=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Netmask/{print $2}')
+          caveat_network=$(ipcalc --nobinary "$ip_caveat_item" | awk '/Prefix|Network/{print $2}')
+          my_ipv6_network=$(ipcalc --nobinary "$my_ipv6/$netmask" | awk '/Prefix|Network/{print $2}')
+          ;;
+        * )
+          netmask=$(ipcalc --netmask  "$ip_caveat_item" | sed -e 's/NETMASK=//')
+          caveat_network=$(ipcalc --network "$ip_caveat_item" | sed -e 's/NETWORK=//')
+          my_ipv6_network=$(ipcalc --network "$my_ipv6/$netmask" | sed -e 's/NETWORK=//')
+          ;;
+      esac
+      if [[ "$caveat_network" == "$my_ipv6_network" ]] ; then
+        #echo "IPv6 address $my_ipv6 matches caveat subnet $ip_caveat_item."
+        match_ipv6=true
+      fi
+    done
+  fi   # End if -n my_ipv6
+
+  # Reset IFS to default (space, tab, newline)
+  IFS="$OLDIFS"
+
+  # Let's see what we got. Does IPv4 match? Does IPv6 match?
+  if [ -n "$my_ipv4" ] ; then
+    if $match_ipv4 ; then
+      if [ -n "$my_ipv6" ] ; then
+        if $match_ipv6 ; then
+          echo "Both your IPv4 ($my_ipv4) and IPv6 ($my_ipv6) match. This macaroon is valid from this system."
+          return 0
+        else
+          echo "Your IPv4 ($my_ipv4) matches, but your IPv6 ($my_ipv6) doesn't. Not sure if this macaroon will work on this system."
+          return 1
+        fi
+      else
+        # There is no IPv6 on this system
+        echo "Your IPv4 ($my_ipv4) matches. This macaroon is valid from this system."
+        return 0
+      fi
+    else
+      # IPv4 doesn't match
+      if [ -n "$my_ipv6" ] ; then
+        if $match_ipv6 ; then
+          echo "Your IPv6 ($my_ipv6) matches, but your IPv4 ($my_ipv4) doesn't. Not sure if this macaroon will work on this system."
+        else
+          echo "Neither your IPv4 ($my_ipv4) nor your IPv6 ($my_ipv6) address matches the IP caveat. This macaroon will not work on this system."
+        fi
+      else
+        echo "Your IPv4 ($my_ipv4) does not match. This macaroon will not work on this system."
+      fi
+      return 1
+    fi
+  else
+    # No IPv4 on this system.
+    if [ -n "$my_ipv6" ] ; then
+      if $match_ipv6 ; then
+        echo "Your IPv6 ($my_ipv6) matches. This macaroon is valid on this system."
+        return 0
+      else
+        echo "Your IPv6 ($my_ipv6) does not match. This macaroon will not work on this system."
+        return 1
+      fi
+    else
+      echo "No IP addresses found on this system. Could not validate IP caveat of macaroon."
+      return 1
+    fi
+  fi
+}
+
+
 check_token() {
   local token="$1"
   local token_debug_info="$2"
@@ -67,7 +235,7 @@ check_token() {
   # Determine token type (JWT or Macaroon)
   if [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
     # JWT / OIDC token
-    payload=$(echo "$token" | cut -d "." -f2 | base64 -d 2>/dev/null | tr -d '\n')
+    payload=$(echo "$token" | cut -d "." -f2 | base64 -d 2>/dev/null | tr -d $'\n')
 
     # Check if decoding succeeded
     if [ -z "$payload" ]; then
@@ -80,8 +248,7 @@ check_token() {
 
     # Extract expiration time (exp) from payload
     exp_unix=$(echo "$payload" | jq -r '.exp' 2>/dev/null)
-
-    # Fail if the token has (almost) expired
+    # Fail if the token has expired
     if ! validate_expiration_timestamp "$exp_unix" "$token_debug_info" ; then
       echo 1>&2 "JWT/OIDC token is no longer valid."
       return 1
@@ -94,11 +261,13 @@ check_token() {
   else
     # Macaroon Token (assume it's base64 encoded)
     # We use grep with --text to avoid a "Binary file" message.
+    # We use tr -d '\0' to strip off NUL characters,
+    # and 2>/dev/null to hide an error message on MacOS.
     macaroon_decoded=$(echo "$token" \
                        | base64 -d 2>/dev/null \
                        | awk '{print substr($0, 5)}' 2>/dev/null \
                        | grep --text -v 'signature' \
-                       | tr -d '\0')
+                       | tr -d '\0' 2>/dev/null )
 
     # Check if decoding succeeded
     if [ -z "$macaroon_decoded" ]; then
@@ -137,6 +306,12 @@ check_token() {
     if ! validate_expiration_timestamp "$exp_unix" "$token_debug_info" ; then
       echo 1>&2 "Macaroon is no longer valid."
       return 1
+    fi
+
+    if $verbose ; then
+      # Validate IP caveat
+      ip_caveat=$(echo "$macaroon_decoded" | grep -o 'ip:.*' | sed -e 's/ip://')
+      validate_ip_caveat "$ip_caveat"
     fi
 
     # If we get here, it means we have a valid macaroon.
