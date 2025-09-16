@@ -10,8 +10,8 @@
 # Old versions available at:
 # https://github.com/onnozweers/dcache-scripts/blob/master/get-share-link
 #
-# Uses a script called view-macaroon, which is available here:
-# https://github.com/sara-nl/GridScripts/blob/master/view-macaroon
+# Uses a script called view-token, which is available here:
+# https://github.com/sara-nl/GridScripts/blob/master/view-token
 #
 # Changes:
 # 2018-06-22 - Onno - Initial version
@@ -430,10 +430,10 @@ if [ -x "${script_dir}/view-token" ] ; then
 else
   macaroon_viewer="$(command -v view-token)"
 fi
-echo 1>&2 "Macaroon viewer: $macaroon_viewer"
-# The <(cat) construction is to prevent the macaroon to be visible with the 'ps' command.
-macaroon_decoded=$($macaroon_viewer --minimal <(cat <<<"$macaroon") )
 if [ -x "$macaroon_viewer" ] ; then
+  echo 1>&2 "Macaroon viewer: $macaroon_viewer"
+  # The <(cat) construction is to prevent the macaroon to be visible with the 'ps' command.
+  macaroon_decoded=$($macaroon_viewer --minimal <(cat <<<"$macaroon") )
   {
     echo "=== View deserialized macaroon ==="
     echo "$macaroon_decoded"
@@ -448,6 +448,14 @@ if [ -x "$macaroon_viewer" ] ; then
     echo -e "=====================================\n"
   } >> ~/macaroons.log
   chmod 600 ~/macaroons.log
+else
+  {
+    echo
+    echo "Warning: could not find command view-token." \
+         "Unable to show or log the macaroon properties."
+    echo "Install view-token (from the same repo as get-macaroon) to get rid of this message."
+    echo
+  } 1>&2
 fi
 
 
