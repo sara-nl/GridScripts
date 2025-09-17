@@ -77,7 +77,7 @@ usage() {
 	                           On SURF systems, get-macaroon is pre-configured
 	                           with the subnets of many SURF services. You may not
 	                           need to use the --ip option.
-	                           '--ip auto' will use the xternal IP address(es)
+	                           '--ip auto' will use the external IP address(es)
 	                           of your local system. The macaroon will only be valid
 	                           on your own system, not on any other. This may
 	                           prevent abuse.
