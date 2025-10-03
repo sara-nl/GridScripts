@@ -344,13 +344,18 @@ done
 
 
 if [ -n "$tokenfile" ] ; then
-  $verbose && echo "Token source: $tokenfile"
   #
   # Read the tokenfile only once (It might be a file descriptor that will be closed after reading)
-  tokenfile_contents=$(<"$tokenfile") || {
-    echo "ERROR: unable to read token from '$tokenfile'" 1>&2
-    exit 1
-  }
+  if [ "$tokenfile" = "-" ]; then
+    echo "Reading token from stdin..." 1>&2
+    tokenfile_contents=$(cat)
+  else
+    $verbose && echo "Token source: $tokenfile"
+    tokenfile_contents=$(<"$tokenfile") || {
+      echo "ERROR: unable to read token from '$tokenfile'" 1>&2
+      exit 1
+    }
+  fi
   #
   # First, we assume the tokenfile is an Rclone config file.
   token=$(sed -n 's/^bearer_token *= *//p' <<<"$tokenfile_contents")
