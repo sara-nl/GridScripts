@@ -13,10 +13,11 @@ usage() {
 	<filename>     - file containing a token. Can be a plain text file with the bare token,
 	                 or an Rclone config file. In that case, view-token will search for
 	                 a line containing "bearer_token" and decode the value.
-	                 You can use a trick like this:
+	                 If filename is "-" (dash), view-token will read the token from stdin.
+	                 To read the token in a safe way from an environment variable,
+	                 you can use this trick:
 	                     view-token <(cat <<<"\$my_token")
-	                 This allows you to read from a variable without exposing the variable
-	                 to other users with the ps command.
+	                 This will not expose your token to other users with the ps command.
 
 	<no filename>  - view-token will look for environment variable BEARER_TOKEN
 	                 and decode its value.
