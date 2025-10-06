@@ -16,7 +16,7 @@ usage() {
 	                 If filename is "-" (dash), view-token will read the token from stdin.
 	                 To read the token in a safe way from an environment variable,
 	                 you can use this trick:
-	                     view-token <(cat <<<"\$my_token")
+	                     view-token - <<<"\$my_token"
 	                 This will not expose your token to other users with the ps command.
 
 	<no filename>  - view-token will look for environment variable BEARER_TOKEN
