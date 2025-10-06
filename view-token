@@ -13,10 +13,11 @@ usage() {
 	<filename>     - file containing a token. Can be a plain text file with the bare token,
 	                 or an Rclone config file. In that case, view-token will search for
 	                 a line containing "bearer_token" and decode the value.
-	                 You can use a trick like this:
-	                     view-token <(cat <<<"\$my_token")
-	                 This allows you to read from a variable without exposing the variable
-	                 to other users with the ps command.
+	                 If filename is "-" (dash), view-token will read the token from stdin.
+	                 To read the token in a safe way from an environment variable,
+	                 you can use this trick:
+	                     view-token - <<<"\$my_token"
+	                 This will not expose your token to other users with the ps command.
 
 	<no filename>  - view-token will look for environment variable BEARER_TOKEN
 	                 and decode its value.
@@ -344,13 +345,18 @@ done
 
 
 if [ -n "$tokenfile" ] ; then
-  $verbose && echo "Token source: $tokenfile"
   #
   # Read the tokenfile only once (It might be a file descriptor that will be closed after reading)
-  tokenfile_contents=$(<"$tokenfile") || {
-    echo "ERROR: unable to read token from '$tokenfile'" 1>&2
-    exit 1
-  }
+  if [ "$tokenfile" = "-" ]; then
+    $verbose && echo "Reading token from stdin. Input is not shown. Continue with the Enter key." 1>&2
+    read -s tokenfile_contents
+  else
+    $verbose && echo "Token source: $tokenfile"
+    tokenfile_contents=$(<"$tokenfile") || {
+      echo "ERROR: unable to read token from '$tokenfile'" 1>&2
+      exit 1
+    }
+  fi
   #
   # First, we assume the tokenfile is an Rclone config file.
   token=$(sed -n 's/^bearer_token *= *//p' <<<"$tokenfile_contents")
@@ -374,6 +380,11 @@ else
     exit 1
   fi
   # read BEARER_TOKEN
+fi
+
+if [ -z "$token" ] ; then
+  echo 1>&2 "ERROR: token is empty."
+  exit 1
 fi
 
 check_token "$token" || exit 1
