@@ -348,7 +348,7 @@ if [ -n "$tokenfile" ] ; then
   #
   # Read the tokenfile only once (It might be a file descriptor that will be closed after reading)
   if [ "$tokenfile" = "-" ]; then
-    echo "Reading token from stdin. Input is not shown. Continue with the Enter key." 1>&2
+    $verbose && echo "Reading token from stdin. Input is not shown. Continue with the Enter key." 1>&2
     read -s tokenfile_contents
   else
     $verbose && echo "Token source: $tokenfile"
