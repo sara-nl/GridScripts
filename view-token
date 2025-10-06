@@ -348,8 +348,8 @@ if [ -n "$tokenfile" ] ; then
   #
   # Read the tokenfile only once (It might be a file descriptor that will be closed after reading)
   if [ "$tokenfile" = "-" ]; then
-    echo "Reading token from stdin..." 1>&2
-    tokenfile_contents=$(cat)
+    echo "Reading token from stdin. Input is not shown. Continue with the Enter key." 1>&2
+    read -s tokenfile_contents
   else
     $verbose && echo "Token source: $tokenfile"
     tokenfile_contents=$(<"$tokenfile") || {
@@ -380,6 +380,11 @@ else
     exit 1
   fi
   # read BEARER_TOKEN
+fi
+
+if [ -z "$token" ] ; then
+  echo 1>&2 "ERROR: token is empty."
+  exit 1
 fi
 
 check_token "$token" || exit 1
